@@ -7,7 +7,7 @@ points_path(collection::AbstractString) = "/collections/$collection/points"
 # ── Selector dispatch ────────────────────────────────────────────────────
 
 point_selector(ids::AbstractVector{<:PointId}) = Dict{String,Any}("points" => collect(ids))
-point_selector(f::Filter) = Dict{String,Any}("filter" => to_dict(f))
+point_selector(f::Filter) = Dict{String,Any}("filter" => f)
 point_selector(id::PointId) = point_selector([id])
 
 wait_query(wait::Bool) = Dict("wait" => wait)
@@ -24,7 +24,7 @@ Insert or update points.
 function upsert_points(c::QdrantConnection, collection::AbstractString,
                        points::AbstractVector{<:PointStruct};
                        wait::Bool=true, ordering::AbstractString="weak")
-    body = Dict{String,Any}("points" => [to_dict(p) for p in points], "ordering" => ordering)
+    body = Dict{String,Any}("points" => points, "ordering" => ordering)
     execute(HTTP.put, c, points_path(collection), body; query=wait_query(wait))
 end
 upsert_points(collection::AbstractString, points::AbstractVector{<:PointStruct}; kw...) =
@@ -129,7 +129,7 @@ Update vectors for existing points.
 """
 function update_vectors(c::QdrantConnection, collection::AbstractString,
                         points::AbstractVector; wait::Bool=true)
-    body = Dict{String,Any}("points" => [p isa AbstractQdrantType ? to_dict(p) : p for p in points])
+    body = Dict{String,Any}("points" => collect(points))
     execute(HTTP.put, c, points_path(collection) * "/vectors", body; query=wait_query(wait))
 end
 update_vectors(collection::AbstractString, points::AbstractVector; kw...) =
@@ -169,7 +169,7 @@ function scroll_points(c::QdrantConnection, collection::AbstractString;
         "with_vectors" => with_vectors,
         "with_payload" => with_payload,
     )
-    filter !== nothing && (body["filter"] = to_dict(filter))
+    filter !== nothing && (body["filter"] = filter)
     offset !== nothing && (body["offset"] = offset)
     execute(HTTP.post, c, points_path(collection) * "/scroll", body)
 end
@@ -184,7 +184,7 @@ Count points in a collection.
 function count_points(c::QdrantConnection, collection::AbstractString;
                       filter::Optional{Filter}=nothing, exact::Bool=false)
     body = Dict{String,Any}("exact" => exact)
-    filter !== nothing && (body["filter"] = to_dict(filter))
+    filter !== nothing && (body["filter"] = filter)
     execute(HTTP.post, c, points_path(collection) * "/count", body)
 end
 count_points(collection::AbstractString; kw...) =
@@ -222,7 +222,7 @@ function create_payload_index(c::QdrantConnection, collection::AbstractString,
                               wait::Bool=true)
     body = Dict{String,Any}("field_name" => field_name)
     if field_schema isa AbstractQdrantType
-        body["field_schema"] = to_dict(field_schema)
+        body["field_schema"] = field_schema
     elseif field_schema !== nothing
         body["field_schema"] = field_schema
     end

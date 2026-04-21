@@ -35,7 +35,7 @@ Execute multiple searches in one call.
 """
 function search_batch(c::QdrantConnection, collection::AbstractString,
                       requests::AbstractVector{SearchRequest})
-    body = Dict{String,Any}("searches" => [to_dict(r) for r in requests])
+    body = Dict{String,Any}("searches" => collect(requests))
     execute(HTTP.post, c, search_path(collection) * "/search/batch", body)
 end
 search_batch(collection::AbstractString, requests::AbstractVector{SearchRequest}) =
@@ -79,7 +79,7 @@ Execute multiple recommendations in one call.
 """
 function recommend_batch(c::QdrantConnection, collection::AbstractString,
                          requests::AbstractVector{RecommendRequest})
-    body = Dict{String,Any}("searches" => [to_dict(r) for r in requests])
+    body = Dict{String,Any}("searches" => collect(requests))
     execute(HTTP.post, c, search_path(collection) * "/recommend/batch", body)
 end
 recommend_batch(collection::AbstractString, requests::AbstractVector{RecommendRequest}) =
@@ -123,7 +123,7 @@ Execute multiple queries in one call.
 """
 function query_batch(c::QdrantConnection, collection::AbstractString,
                      requests::AbstractVector{QueryRequest})
-    body = Dict{String,Any}("searches" => [to_dict(r) for r in requests])
+    body = Dict{String,Any}("searches" => collect(requests))
     execute(HTTP.post, c, search_path(collection) * "/query/batch", body)
 end
 query_batch(collection::AbstractString, requests::AbstractVector{QueryRequest}) =

@@ -21,6 +21,7 @@ module QdrantClient
 using HTTP
 using JSON
 using StructUtils
+using UUIDs
 
 const CLIENT_VERSION = "0.3.0"
 
@@ -145,34 +146,19 @@ function get_client()
 end
 
 # ============================================================================
-# Serialization — powered by StructUtils
+# Serialization — powered by JSON.jl + StructUtils
 # ============================================================================
 
-"""
-    serialize_body(x::AbstractQdrantType) -> String
-
-Serialize a Qdrant type to JSON, stripping `nothing` fields.
-"""
-serialize_body(x::AbstractQdrantType) = JSON.json(to_dict(x))
+const _JSON_KW = (omit_null=true, omit_empty=true)
 
 """
-    to_dict(x::AbstractQdrantType) -> Dict{String,Any}
+    serialize_body(x) -> String
 
-Convert a Qdrant type to a Dict, dropping `nothing` fields.
-Uses StructUtils.make for struct → Dict conversion.
+Serialize a value to JSON, stripping `nothing` fields and empty collections.
 """
-function to_dict(x::AbstractQdrantType)
-    d = Dict{String,Any}()
-    StructUtils.applyeach(StructUtils.DefaultStyle(), x) do key, val
-        val !== nothing && (d[string(key)] = _to_dict_value(val))
-        return
-    end
-    d
-end
-
-_to_dict_value(x::AbstractQdrantType) = to_dict(x)
-_to_dict_value(x::AbstractVector) = [_to_dict_value(v) for v in x]
-_to_dict_value(x) = x
+serialize_body(x::AbstractQdrantType) = JSON.json(x; _JSON_KW...)
+serialize_body(x::AbstractDict) = JSON.json(x; _JSON_KW...)
+serialize_body(x) = JSON.json(x; _JSON_KW...)
 
 # ============================================================================
 # HTTP Request Infrastructure
@@ -211,10 +197,8 @@ function request(method::Function, conn::QdrantConnection, path::AbstractString,
     if body !== nothing
         kw[:body] = if body isa AbstractString
             body
-        elseif body isa AbstractQdrantType
-            serialize_body(body)
         else
-            JSON.json(body)
+            serialize_body(body)
         end
     end
     resp = method(url; kw...)
@@ -273,9 +257,15 @@ export Distance, Cosine, Euclid, Dot, Manhattan, PointId
 
 # Config types
 export CollectionConfig, CollectionUpdate, VectorParams, SparseVectorParams
+export HnswConfig, WalConfig, OptimizersConfig, CollectionParamsDiff
+export SearchParams, QuantizationSearchParams
+export ScalarQuantization, ScalarQuantizationConfig
+export ProductQuantization, ProductQuantizationConfig
+export BinaryQuantization, BinaryQuantizationConfig
+export QuantizationConfig, LookupLocation
 
 # Point types
-export PointStruct
+export PointStruct, NamedVector
 
 # Conditions
 export Filter, FieldCondition, MatchValue, MatchAny, MatchText,
@@ -288,7 +278,7 @@ export SearchRequest, RecommendRequest, QueryRequest, DiscoverRequest
 export TextIndexParams
 
 # Serialization
-export to_dict, serialize_body
+export serialize_body
 
 # Collections API
 export list_collections, create_collection, delete_collection,

@@ -50,6 +50,15 @@ end
         @test CollectionConfig <: AbstractConfig
         @test CollectionUpdate <: AbstractConfig
         @test TextIndexParams <: AbstractConfig
+        @test HnswConfig <: AbstractConfig
+        @test WalConfig <: AbstractConfig
+        @test OptimizersConfig <: AbstractConfig
+        @test SearchParams <: AbstractConfig
+        @test CollectionParamsDiff <: AbstractConfig
+        @test LookupLocation <: AbstractConfig
+        @test ScalarQuantization <: AbstractConfig
+        @test ProductQuantization <: AbstractConfig
+        @test BinaryQuantization <: AbstractConfig
 
         @test SearchRequest <: AbstractRequest
         @test RecommendRequest <: AbstractRequest
@@ -67,6 +76,7 @@ end
         @test IsNullCondition <: AbstractCondition
 
         @test PointStruct <: AbstractQdrantType
+        @test NamedVector <: AbstractQdrantType
     end
 
     # ── Distance Enum ───────────────────────────────────────────────────
@@ -81,52 +91,105 @@ end
         @test string(Manhattan) == "Manhattan"
     end
 
+    # ── PointId Type ────────────────────────────────────────────────────
+    @testset "PointId Type" begin
+        @test 42 isa PointId
+        @test uuid4() isa PointId
+        @test !(1.5 isa PointId)
+        @test !("string" isa PointId)
+    end
+
     # ── StructUtils Serialization ───────────────────────────────────────
     @testset "StructUtils Serialization" begin
         @testset "VectorParams" begin
             vp = VectorParams(size=4, distance=Dot)
-            j = JSON.json(vp)
+            j = JSON.json(vp; omit_null=true)
             parsed = JSON.parse(j)
             @test parsed["size"] == 4
             @test parsed["distance"] == "Dot"
+            @test !haskey(parsed, "hnsw_config")
+            @test !haskey(parsed, "on_disk")
+        end
+
+        @testset "VectorParams with HnswConfig" begin
+            vp = VectorParams(size=4, distance=Euclid,
+                hnsw_config=HnswConfig(m=32, ef_construct=200))
+            j = JSON.json(vp; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["hnsw_config"]["m"] == 32
+            @test parsed["hnsw_config"]["ef_construct"] == 200
+            @test !haskey(parsed["hnsw_config"], "on_disk")
         end
 
         @testset "CollectionConfig" begin
             cfg = CollectionConfig(vectors=VectorParams(size=128, distance=Cosine))
-            j = JSON.json(cfg)
+            j = JSON.json(cfg; omit_null=true)
             parsed = JSON.parse(j)
             @test parsed["vectors"]["size"] == 128
             @test parsed["vectors"]["distance"] == "Cosine"
         end
 
-        @testset "PointStruct" begin
+        @testset "CollectionConfig with typed sub-configs" begin
+            cfg = CollectionConfig(
+                vectors=VectorParams(size=4, distance=Dot),
+                hnsw_config=HnswConfig(m=16),
+                optimizers_config=OptimizersConfig(indexing_threshold=10000),
+            )
+            j = JSON.json(cfg; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["hnsw_config"]["m"] == 16
+            @test parsed["optimizers_config"]["indexing_threshold"] == 10000
+        end
+
+        @testset "PointStruct with Int id" begin
             pt = PointStruct(id=1, vector=Float32[1.0, 2.0, 3.0])
-            j = JSON.json(pt)
+            j = JSON.json(pt; omit_null=true)
             parsed = JSON.parse(j)
             @test parsed["id"] == 1
             @test parsed["vector"] == [1.0, 2.0, 3.0]
+            @test !haskey(parsed, "payload")
         end
 
-        @testset "PointStruct with payload" begin
-            pt = PointStruct(id="uuid-id", vector=Float32[0.1, 0.2],
+        @testset "PointStruct with UUID id" begin
+            u = uuid4()
+            pt = PointStruct(id=u, vector=Float32[0.1, 0.2],
                              payload=Dict{String,Any}("color" => "red"))
-            j = JSON.json(pt)
+            j = JSON.json(pt; omit_null=true)
             parsed = JSON.parse(j)
-            @test parsed["id"] == "uuid-id"
+            @test parsed["id"] == string(u)
             @test parsed["payload"]["color"] == "red"
+        end
+
+        @testset "NamedVector" begin
+            nv = NamedVector(name="image", vector=Float32[1.0, 0.0, 0.0, 0.0])
+            j = JSON.json(nv; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["name"] == "image"
+            @test length(parsed["vector"]) == 4
         end
 
         @testset "SearchRequest" begin
             sr = SearchRequest(vector=Float32[1.0, 0.0], limit=5, with_payload=true)
-            j = JSON.json(sr)
+            j = JSON.json(sr; omit_null=true)
             parsed = JSON.parse(j)
             @test parsed["limit"] == 5
             @test parsed["with_payload"] === true
+            @test !haskey(parsed, "filter")
+            @test !haskey(parsed, "params")
+        end
+
+        @testset "SearchRequest with SearchParams" begin
+            sr = SearchRequest(vector=Float32[1.0], limit=5,
+                params=SearchParams(exact=true, hnsw_ef=128))
+            j = JSON.json(sr; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["params"]["exact"] === true
+            @test parsed["params"]["hnsw_ef"] == 128
         end
 
         @testset "RecommendRequest using_ → using tag" begin
             rr = RecommendRequest(positive=Any[1, 2], limit=5, using_="dense")
-            j = JSON.json(rr)
+            j = JSON.json(rr; omit_null=true)
             parsed = JSON.parse(j)
             @test parsed["using"] == "dense"
             @test !haskey(parsed, "using_")
@@ -134,7 +197,15 @@ end
 
         @testset "QueryRequest using_ → using tag" begin
             qr = QueryRequest(query=Float32[1.0, 0.0], limit=3, using_="image")
-            j = JSON.json(qr)
+            j = JSON.json(qr; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["using"] == "image"
+            @test !haskey(parsed, "using_")
+        end
+
+        @testset "DiscoverRequest using_ → using tag" begin
+            dr = DiscoverRequest(target=Float32[1.0, 0.0], limit=3, using_="image")
+            j = JSON.json(dr; omit_null=true)
             parsed = JSON.parse(j)
             @test parsed["using"] == "image"
             @test !haskey(parsed, "using_")
@@ -142,44 +213,96 @@ end
 
         @testset "Filter" begin
             f = Filter(must=Any[Dict("key" => "color", "match" => Dict("value" => "red"))])
-            j = JSON.json(f)
+            j = JSON.json(f; omit_null=true, omit_empty=true)
             parsed = JSON.parse(j)
             @test length(parsed["must"]) == 1
+            @test !haskey(parsed, "should")
         end
 
         @testset "TextIndexParams" begin
             tip = TextIndexParams(tokenizer="word", lowercase=true)
-            j = JSON.json(tip)
+            j = JSON.json(tip; omit_null=true)
             parsed = JSON.parse(j)
             @test parsed["type"] == "text"
             @test parsed["tokenizer"] == "word"
             @test parsed["lowercase"] === true
         end
+
+        @testset "SearchParams" begin
+            sp = SearchParams(hnsw_ef=128, exact=false)
+            j = JSON.json(sp; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["hnsw_ef"] == 128
+            @test parsed["exact"] === false
+            @test !haskey(parsed, "quantization")
+        end
+
+        @testset "OptimizersConfig" begin
+            oc = OptimizersConfig(indexing_threshold=10000, flush_interval_sec=5)
+            j = JSON.json(oc; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["indexing_threshold"] == 10000
+            @test parsed["flush_interval_sec"] == 5
+            @test !haskey(parsed, "deleted_threshold")
+        end
+
+        @testset "LookupLocation" begin
+            ll = LookupLocation(collection="other", vector="dense")
+            j = JSON.json(ll; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["collection"] == "other"
+            @test parsed["vector"] == "dense"
+        end
+
+        @testset "CollectionUpdate with typed configs" begin
+            cu = CollectionUpdate(
+                optimizers_config=OptimizersConfig(indexing_threshold=10000),
+                params=CollectionParamsDiff(replication_factor=2),
+            )
+            j = JSON.json(cu; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["optimizers_config"]["indexing_threshold"] == 10000
+            @test parsed["params"]["replication_factor"] == 2
+        end
+
+        @testset "ScalarQuantization" begin
+            sq = ScalarQuantization(scalar=ScalarQuantizationConfig(quantile=0.99))
+            j = JSON.json(sq; omit_null=true)
+            parsed = JSON.parse(j)
+            @test parsed["scalar"]["type"] == "int8"
+            @test parsed["scalar"]["quantile"] == 0.99
+        end
     end
 
-    # ── to_dict (nothing-stripping) ─────────────────────────────────────
-    @testset "to_dict" begin
+    # ── serialize_body ──────────────────────────────────────────────────
+    @testset "serialize_body" begin
         vp = VectorParams(size=4, distance=Dot)
-        d = to_dict(vp)
-        @test d["size"] == 4
-        @test d["distance"] == "Dot"
-        @test !haskey(d, "hnsw_config")
-        @test !haskey(d, "on_disk")
+        s = serialize_body(vp)
+        @test s isa String
+        parsed = JSON.parse(s)
+        @test parsed["size"] == 4
+        @test parsed["distance"] == "Dot"
+        @test !haskey(parsed, "hnsw_config")
 
-        vp2 = VectorParams(size=4, distance=Euclid, on_disk=true)
-        d2 = to_dict(vp2)
-        @test d2["on_disk"] === true
+        # Test with nested struct
+        cfg = CollectionConfig(
+            vectors=VectorParams(size=128, distance=Cosine),
+            hnsw_config=HnswConfig(m=32),
+        )
+        s2 = serialize_body(cfg)
+        p2 = JSON.parse(s2)
+        @test p2["vectors"]["size"] == 128
+        @test p2["hnsw_config"]["m"] == 32
+        @test !haskey(p2, "wal_config")
 
-        pt = PointStruct(id=1, vector=Float32[1.0, 2.0])
-        dp = to_dict(pt)
-        @test dp["id"] == 1
-        @test !haskey(dp, "payload")
-
-        sr = SearchRequest(vector=Float32[1.0], limit=5, with_payload=true)
-        ds = to_dict(sr)
-        @test ds["limit"] == 5
-        @test ds["with_payload"] === true
-        @test !haskey(ds, "filter")
+        # Test Dict serialization
+        d = Dict("a" => 1, "b" => nothing, "c" => [], "d" => "content")
+        sd = serialize_body(d)
+        pd = JSON.parse(sd)
+        @test pd["a"] == 1
+        @test pd["d"] == "content"
+        @test !haskey(pd, "b")
+        @test !haskey(pd, "c")
     end
 
     # ── QdrantConnection / Client ───────────────────────────────────────
@@ -279,16 +402,6 @@ end
         @test r2["key"] == "val"
     end
 
-    # ── serialize_body ──────────────────────────────────────────────────
-    @testset "serialize_body" begin
-        vp = VectorParams(size=4, distance=Dot)
-        s = serialize_body(vp)
-        @test s isa String
-        parsed = JSON.parse(s)
-        @test parsed["size"] == 4
-        @test parsed["distance"] == "Dot"
-    end
-
     # ═══════════════════════════════════════════════════════════════════
     # Integration Tests (require Qdrant on localhost:6333)
     # ═══════════════════════════════════════════════════════════════════
@@ -334,6 +447,23 @@ end
                     vectors=VectorParams(size=4, distance=Cosine))
                 info = get_collection(CONN, coll)
                 @test info["config"]["params"]["vectors"]["distance"] == "Cosine"
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Collection with typed configs ───────────────────────────
+            @testset "Collection with typed configs" begin
+                coll = unique_name("cfg")
+                cleanup_collection(CONN, coll)
+
+                create_collection(CONN, coll, CollectionConfig(
+                    vectors=VectorParams(size=4, distance=Dot),
+                    hnsw_config=HnswConfig(m=32, ef_construct=200),
+                    optimizers_config=OptimizersConfig(indexing_threshold=10000),
+                ))
+                info = get_collection(CONN, coll)
+                @test info["config"]["hnsw_config"]["m"] == 32
+                @test info["config"]["optimizer_config"]["indexing_threshold"] == 10000
 
                 cleanup_collection(CONN, coll)
             end
@@ -410,8 +540,8 @@ end
                 create_collection(CONN, coll,
                     CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
 
-                u1 = string(uuid4())
-                u2 = string(uuid4())
+                u1 = uuid4()
+                u2 = uuid4()
                 pts = [
                     PointStruct(id=u1, vector=Float32[1.0, 0.0, 0.0, 0.0],
                                 payload=Dict{String,Any}("label" => "first")),
@@ -423,7 +553,7 @@ end
 
                 got = get_points(CONN, coll, [u1]; with_payload=true)
                 @test length(got) == 1
-                @test got[1]["id"] == u1
+                @test got[1]["id"] == string(u1)
                 @test got[1]["payload"]["label"] == "first"
 
                 cleanup_collection(CONN, coll)
@@ -522,6 +652,22 @@ end
                 @test length(batch) == 2
                 @test length(batch[1]) == 2
                 @test length(batch[2]) == 1
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Search with SearchParams ────────────────────────────────
+            @testset "Search with SearchParams" begin
+                coll = unique_name("sparams")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                hits = search_points(CONN, coll,
+                    SearchRequest(vector=Float32[1, 0, 0, 0], limit=2,
+                        params=SearchParams(exact=true)))
+                @test length(hits) == 2
 
                 cleanup_collection(CONN, coll)
             end
@@ -656,22 +802,22 @@ end
                 cleanup_collection(CONN, coll)
 
                 cfg = CollectionConfig(
-                    vectors=Dict{String,Any}(
-                        "image" => Dict{String,Any}("size" => 4, "distance" => "Cosine"),
-                        "text" => Dict{String,Any}("size" => 4, "distance" => "Dot"),
+                    vectors=Dict{String,VectorParams}(
+                        "image" => VectorParams(size=4, distance=Cosine),
+                        "text" => VectorParams(size=4, distance=Dot),
                     )
                 )
                 create_collection(CONN, coll, cfg)
 
                 pts = [
                     PointStruct(id=1,
-                        vector=Dict{String,Any}(
+                        vector=Dict{String,Vector{Float32}}(
                             "image" => Float32[1, 0, 0, 0],
                             "text" => Float32[0, 1, 0, 0],
                         ),
                         payload=Dict{String,Any}("label" => "first")),
                     PointStruct(id=2,
-                        vector=Dict{String,Any}(
+                        vector=Dict{String,Vector{Float32}}(
                             "image" => Float32[0, 1, 0, 0],
                             "text" => Float32[1, 0, 0, 0],
                         ),
@@ -679,16 +825,17 @@ end
                 ]
                 upsert_points(CONN, coll, pts; wait=true)
 
+                # Search with NamedVector struct
                 hits = search_points(CONN, coll,
-                    SearchRequest(vector=Dict{String,Any}(
-                        "name" => "image", "vector" => Float32[1, 0, 0, 0]),
+                    SearchRequest(
+                        vector=NamedVector(name="image", vector=Float32[1, 0, 0, 0]),
                         limit=2, with_payload=true))
                 @test length(hits) == 2
                 @test hits[1]["id"] == 1
 
                 hits2 = search_points(CONN, coll,
-                    SearchRequest(vector=Dict{String,Any}(
-                        "name" => "text", "vector" => Float32[1, 0, 0, 0]),
+                    SearchRequest(
+                        vector=NamedVector(name="text", vector=Float32[1, 0, 0, 0]),
                         limit=2, with_payload=true))
                 @test length(hits2) == 2
                 @test hits2[1]["id"] == 2
@@ -702,15 +849,15 @@ end
                 cleanup_collection(CONN, coll)
 
                 cfg = CollectionConfig(
-                    vectors=Dict{String,Any}(
-                        "dense" => Dict{String,Any}("size" => 4, "distance" => "Dot"),
+                    vectors=Dict{String,VectorParams}(
+                        "dense" => VectorParams(size=4, distance=Dot),
                     )
                 )
                 create_collection(CONN, coll, cfg)
 
                 pts = [
-                    PointStruct(id=1, vector=Dict{String,Any}("dense" => Float32[1, 0, 0, 0])),
-                    PointStruct(id=2, vector=Dict{String,Any}("dense" => Float32[0, 1, 0, 0])),
+                    PointStruct(id=1, vector=Dict{String,Vector{Float32}}("dense" => Float32[1, 0, 0, 0])),
+                    PointStruct(id=2, vector=Dict{String,Vector{Float32}}("dense" => Float32[0, 1, 0, 0])),
                 ]
                 upsert_points(CONN, coll, pts; wait=true)
 
@@ -799,8 +946,8 @@ end
                     CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
 
                 result = update_collection(CONN, coll,
-                    CollectionUpdate(optimizers_config=Dict{String,Any}(
-                        "indexing_threshold" => 10000
+                    CollectionUpdate(optimizers_config=OptimizersConfig(
+                        indexing_threshold=10000
                     )))
                 @test result === true
 
@@ -856,11 +1003,6 @@ end
                 serialize_body(VectorParams(size=128, distance=Dot))
             end
             @info "Benchmark: 1000 serialize_body calls" time_s=round(t_ser, digits=4)
-
-            t_dict = @elapsed for _ in 1:1000
-                to_dict(VectorParams(size=128, distance=Dot))
-            end
-            @info "Benchmark: 1000 to_dict calls" time_s=round(t_dict, digits=4)
 
             cleanup_collection(CONN, coll)
         else

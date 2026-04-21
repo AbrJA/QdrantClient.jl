@@ -12,9 +12,10 @@ const Optional{T} = Union{Nothing, T}
 """
     PointId
 
-A unique point identifier — integer or UUID string.
+A unique point identifier — integer or UUID.
+Qdrant accepts `uint64` or `uuid` format strings.
 """
-const PointId = Union{Int, String}
+const PointId = Union{Int, UUID}
 
 # ============================================================================
 # Abstract Type Hierarchy
@@ -61,8 +62,188 @@ Values: `Cosine`, `Euclid`, `Dot`, `Manhattan`
 """
 @enum Distance Cosine Euclid Dot Manhattan
 
-# StructUtils integration: serialize enum as string name
 StructUtils.lower(d::Distance) = string(d)
+
+# ============================================================================
+# HNSW Configuration
+# ============================================================================
+
+"""
+    HnswConfig <: AbstractConfig
+
+HNSW index configuration parameters.
+
+# Fields
+- `m`: Number of edges per node in the index graph
+- `ef_construct`: Number of neighbours to consider during index building
+- `full_scan_threshold`: Size (KB) below which full-scan is preferred
+- `max_indexing_threads`: Parallel threads for background index building
+- `on_disk`: Store HNSW index on disk (default: false)
+- `payload_m`: Custom M param for payload-aware HNSW links
+- `inline_storage`: Store vector copies within the HNSW index file
+"""
+StructUtils.@kwarg struct HnswConfig <: AbstractConfig
+    m::Optional{Int} = nothing
+    ef_construct::Optional{Int} = nothing
+    full_scan_threshold::Optional{Int} = nothing
+    max_indexing_threads::Optional{Int} = nothing
+    on_disk::Optional{Bool} = nothing
+    payload_m::Optional{Int} = nothing
+    inline_storage::Optional{Bool} = nothing
+end
+
+# ============================================================================
+# WAL Configuration
+# ============================================================================
+
+"""
+    WalConfig <: AbstractConfig
+
+Write-Ahead Log configuration.
+
+# Fields
+- `wal_capacity_mb`: Size of a single WAL segment in MB
+- `wal_segments_ahead`: Number of WAL segments to create ahead
+- `wal_retain_closed`: Number of closed WAL segments to retain
+"""
+StructUtils.@kwarg struct WalConfig <: AbstractConfig
+    wal_capacity_mb::Optional{Int} = nothing
+    wal_segments_ahead::Optional{Int} = nothing
+    wal_retain_closed::Optional{Int} = nothing
+end
+
+# ============================================================================
+# Optimizer Configuration
+# ============================================================================
+
+"""
+    OptimizersConfig <: AbstractConfig
+
+Segment optimizer configuration.
+
+# Fields
+- `deleted_threshold`: Minimal fraction of deleted vectors to trigger optimization
+- `vacuum_min_vector_number`: Minimal vectors in a segment for optimization
+- `default_segment_number`: Target number of segments
+- `max_segment_size`: Max segment size in KB
+- `memmap_threshold`: Max in-memory vectors per segment (KB)
+- `indexing_threshold`: Max vectors for plain index (KB)
+- `flush_interval_sec`: Minimum interval between forced flushes
+- `max_optimization_threads`: Max threads for optimizations per shard
+- `prevent_unoptimized`: Prevent creation of large unoptimized segments
+"""
+StructUtils.@kwarg struct OptimizersConfig <: AbstractConfig
+    deleted_threshold::Optional{Float64} = nothing
+    vacuum_min_vector_number::Optional{Int} = nothing
+    default_segment_number::Optional{Int} = nothing
+    max_segment_size::Optional{Int} = nothing
+    memmap_threshold::Optional{Int} = nothing
+    indexing_threshold::Optional{Int} = nothing
+    flush_interval_sec::Optional{Int} = nothing
+    max_optimization_threads::Optional{Int} = nothing
+    prevent_unoptimized::Optional{Bool} = nothing
+end
+
+# ============================================================================
+# Quantization Configuration
+# ============================================================================
+
+"""
+    QuantizationSearchParams <: AbstractConfig
+
+Parameters for quantization during search.
+"""
+StructUtils.@kwarg struct QuantizationSearchParams <: AbstractConfig
+    ignore::Optional{Bool} = nothing
+    rescore::Optional{Bool} = nothing
+    oversampling::Optional{Float64} = nothing
+end
+
+"""
+    ScalarQuantizationConfig <: AbstractConfig
+
+Scalar quantization parameters.
+"""
+StructUtils.@kwarg struct ScalarQuantizationConfig <: AbstractConfig
+    type::String = "int8"
+    quantile::Optional{Float64} = nothing
+    always_ram::Optional{Bool} = nothing
+end
+
+"""
+    ProductQuantizationConfig <: AbstractConfig
+
+Product quantization parameters.
+"""
+StructUtils.@kwarg struct ProductQuantizationConfig <: AbstractConfig
+    compression::String
+    always_ram::Optional{Bool} = nothing
+end
+
+"""
+    BinaryQuantizationConfig <: AbstractConfig
+
+Binary quantization parameters.
+"""
+StructUtils.@kwarg struct BinaryQuantizationConfig <: AbstractConfig
+    always_ram::Optional{Bool} = nothing
+end
+
+"""
+    ScalarQuantization <: AbstractConfig
+
+Scalar quantization wrapper.
+"""
+StructUtils.@kwarg struct ScalarQuantization <: AbstractConfig
+    scalar::ScalarQuantizationConfig
+end
+
+"""
+    ProductQuantization <: AbstractConfig
+
+Product quantization wrapper.
+"""
+StructUtils.@kwarg struct ProductQuantization <: AbstractConfig
+    product::ProductQuantizationConfig
+end
+
+"""
+    BinaryQuantization <: AbstractConfig
+
+Binary quantization wrapper.
+"""
+StructUtils.@kwarg struct BinaryQuantization <: AbstractConfig
+    binary::BinaryQuantizationConfig
+end
+
+"""
+    QuantizationConfig
+
+Union of all quantization configuration types.
+"""
+const QuantizationConfig = Union{ScalarQuantization, ProductQuantization, BinaryQuantization}
+
+# ============================================================================
+# Search Parameters
+# ============================================================================
+
+"""
+    SearchParams <: AbstractConfig
+
+Parameters controlling the search process.
+
+# Fields
+- `hnsw_ef`: Size of the beam in beam-search (larger = more accurate, slower)
+- `exact`: If true, search without approximation (exact but slow)
+- `quantization`: Quantization parameters for search
+- `indexed_only`: Only search among indexed/small segments
+"""
+StructUtils.@kwarg struct SearchParams <: AbstractConfig
+    hnsw_ef::Optional{Int} = nothing
+    exact::Optional{Bool} = nothing
+    quantization::Optional{QuantizationSearchParams} = nothing
+    indexed_only::Optional{Bool} = nothing
+end
 
 # ============================================================================
 # Vector Parameters
@@ -77,14 +258,16 @@ Configuration for a vector field in a collection.
 ```julia
 VectorParams(size=128, distance=Cosine)
 VectorParams(size=4, distance=Dot, on_disk=true)
+VectorParams(size=4, distance=Euclid, hnsw_config=HnswConfig(m=32, ef_construct=200))
 ```
 """
 StructUtils.@kwarg struct VectorParams <: AbstractConfig
     size::Int
     distance::Distance
-    hnsw_config::Optional{Dict{String,Any}} = nothing
-    quantization_config::Optional{Dict{String,Any}} = nothing
+    hnsw_config::Optional{HnswConfig} = nothing
+    quantization_config::Optional{QuantizationConfig} = nothing
     on_disk::Optional{Bool} = nothing
+    datatype::Optional{String} = nothing
 end
 
 """
@@ -97,8 +280,40 @@ StructUtils.@kwarg struct SparseVectorParams <: AbstractConfig
 end
 
 # ============================================================================
+# Named Vector
+# ============================================================================
+
+"""
+    NamedVector <: AbstractQdrantType
+
+A vector with an associated name, for collections with multiple named vectors.
+
+# Examples
+```julia
+NamedVector(name="image", vector=Float32[1.0, 0.0, 0.0, 0.0])
+```
+"""
+StructUtils.@kwarg struct NamedVector <: AbstractQdrantType
+    name::String
+    vector::Union{Vector{Float32}, Vector{Float64}}
+end
+
+# ============================================================================
 # Collection Types
 # ============================================================================
+
+"""
+    CollectionParamsDiff <: AbstractConfig
+
+Mutable collection parameters (used in update operations).
+"""
+StructUtils.@kwarg struct CollectionParamsDiff <: AbstractConfig
+    replication_factor::Optional{Int} = nothing
+    write_consistency_factor::Optional{Int} = nothing
+    read_fan_out_factor::Optional{Int} = nothing
+    read_fan_out_delay_ms::Optional{Int} = nothing
+    on_disk_payload::Optional{Bool} = nothing
+end
 
 """
     CollectionConfig <: AbstractConfig
@@ -108,34 +323,49 @@ Configuration for creating a collection.
 # Examples
 ```julia
 CollectionConfig(vectors=VectorParams(size=128, distance=Cosine))
-CollectionConfig(vectors=VectorParams(size=4, distance=Dot), on_disk_payload=true)
+CollectionConfig(
+    vectors=VectorParams(size=4, distance=Dot),
+    hnsw_config=HnswConfig(m=32),
+    optimizers_config=OptimizersConfig(indexing_threshold=10000),
+)
+# Named vectors:
+CollectionConfig(vectors=Dict{String,VectorParams}(
+    "image" => VectorParams(size=512, distance=Cosine),
+    "text" => VectorParams(size=768, distance=Dot),
+))
 ```
 """
 StructUtils.@kwarg struct CollectionConfig <: AbstractConfig
-    vectors::Union{VectorParams, Dict{String,VectorParams}, Dict{String,Any}}
-    sparse_vectors::Optional{Dict{String,Any}} = nothing
+    vectors::Union{VectorParams, Dict{String,VectorParams}}
+    sparse_vectors::Optional{Dict{String,SparseVectorParams}} = nothing
     shard_number::Optional{Int} = nothing
     replication_factor::Optional{Int} = nothing
     write_consistency_factor::Optional{Int} = nothing
     on_disk_payload::Optional{Bool} = nothing
-    hnsw_config::Optional{Dict{String,Any}} = nothing
-    wal_config::Optional{Dict{String,Any}} = nothing
-    optimizers_config::Optional{Dict{String,Any}} = nothing
-    init_from::Optional{Dict{String,Any}} = nothing
-    quantization_config::Optional{Dict{String,Any}} = nothing
+    hnsw_config::Optional{HnswConfig} = nothing
+    wal_config::Optional{WalConfig} = nothing
+    optimizers_config::Optional{OptimizersConfig} = nothing
+    quantization_config::Optional{QuantizationConfig} = nothing
     sharding_method::Optional{String} = nothing
+    init_from::Optional{Dict{String,Any}} = nothing
 end
 
 """
     CollectionUpdate <: AbstractConfig
 
 Patch payload for updating collection parameters.
+
+# Examples
+```julia
+CollectionUpdate(optimizers_config=OptimizersConfig(indexing_threshold=10000))
+CollectionUpdate(params=CollectionParamsDiff(replication_factor=2))
+```
 """
 StructUtils.@kwarg struct CollectionUpdate <: AbstractConfig
-    optimizers_config::Optional{Dict{String,Any}} = nothing
-    params::Optional{Dict{String,Any}} = nothing
-    hnsw_config::Optional{Dict{String,Any}} = nothing
-    quantization_config::Optional{Dict{String,Any}} = nothing
+    optimizers_config::Optional{OptimizersConfig} = nothing
+    params::Optional{CollectionParamsDiff} = nothing
+    hnsw_config::Optional{HnswConfig} = nothing
+    quantization_config::Optional{QuantizationConfig} = nothing
     vectors::Optional{Dict{String,Any}} = nothing
 end
 
@@ -150,14 +380,30 @@ A point with id, vector(s), and optional payload.
 
 # Examples
 ```julia
-PointStruct(id=1, vector=Float32[0.1, 0.2, 0.3], payload=Dict("label" => "cat"))
-PointStruct(id="uuid-here", vector=Dict("image" => Float32[...], "text" => Float32[...]))
+PointStruct(id=1, vector=Float32[0.1, 0.2, 0.3, 0.4])
+PointStruct(id=uuid4(), vector=Float32[0.1, 0.2, 0.3, 0.4], payload=Dict("label" => "cat"))
+PointStruct(id=1, vector=NamedVector(name="image", vector=Float32[1.0, 0.0, 0.0, 0.0]))
+PointStruct(id=1, vector=Dict{String,Vector{Float32}}("image" => Float32[...], "text" => Float32[...]))
 ```
 """
 StructUtils.@kwarg struct PointStruct <: AbstractQdrantType
     id::PointId
-    vector::Union{Vector{Float32}, Vector{Float64}, Dict{String,Any}, Dict{String,Vector{Float32}}, Dict{String,Vector{Float64}}}
+    vector::Union{Vector{Float32}, Vector{Float64}, NamedVector, Dict{String,Vector{Float32}}, Dict{String,Vector{Float64}}}
     payload::Optional{Dict{String,Any}} = nothing
+end
+
+# ============================================================================
+# Lookup Location
+# ============================================================================
+
+"""
+    LookupLocation <: AbstractConfig
+
+Location to look up vectors in a different collection.
+"""
+StructUtils.@kwarg struct LookupLocation <: AbstractConfig
+    collection::String
+    vector::Optional{String} = nothing
 end
 
 # ============================================================================
@@ -211,7 +457,7 @@ Condition on a specific payload field.
 StructUtils.@kwarg struct FieldCondition <: AbstractCondition
     key::String
     range::Optional{RangeCondition} = nothing
-    match::Optional{Union{MatchValue, MatchAny, MatchText, Dict{String,Any}}} = nothing
+    match::Optional{Union{MatchValue, MatchAny, MatchText}} = nothing
     geo_bounding_box::Optional{Dict{String,Any}} = nothing
     geo_radius::Optional{Dict{String,Any}} = nothing
     geo_polygon::Optional{Dict{String,Any}} = nothing
@@ -275,24 +521,32 @@ Nearest-neighbor search request.
 ```julia
 SearchRequest(vector=Float32[1,0,0,0], limit=10)
 SearchRequest(vector=Float32[1,0,0,0], limit=5, with_payload=true)
+SearchRequest(vector=NamedVector(name="image", vector=Float32[1,0,0,0]), limit=5)
+SearchRequest(vector=Float32[1,0,0,0], limit=10, params=SearchParams(exact=true))
 ```
 """
 StructUtils.@kwarg struct SearchRequest <: AbstractRequest
-    vector::Union{Vector{Float32}, Vector{Float64}, String, Dict{String,Any}}
+    vector::Union{Vector{Float32}, Vector{Float64}, NamedVector, String}
     limit::Int
     filter::Optional{Filter} = nothing
     offset::Optional{Int} = nothing
     with_payload::Optional{Union{Bool, Vector{String}}} = nothing
     with_vector::Optional{Union{Bool, Vector{String}}} = nothing
     score_threshold::Optional{Float64} = nothing
-    lookup_from::Optional{Dict{String,Any}} = nothing
-    params::Optional{Dict{String,Any}} = nothing
+    params::Optional{SearchParams} = nothing
+    lookup_from::Optional{LookupLocation} = nothing
 end
 
 """
     RecommendRequest <: AbstractRequest
 
 Recommendation request based on positive/negative examples.
+
+# Examples
+```julia
+RecommendRequest(positive=[1, 2], limit=5)
+RecommendRequest(positive=[1], negative=[3], limit=10, using_="image")
+```
 """
 StructUtils.@kwarg struct RecommendRequest <: AbstractRequest
     positive::Optional{Vector{Any}} = nothing
@@ -303,8 +557,8 @@ StructUtils.@kwarg struct RecommendRequest <: AbstractRequest
     with_payload::Optional{Union{Bool, Vector{String}}} = nothing
     with_vector::Optional{Union{Bool, Vector{String}}} = nothing
     score_threshold::Optional{Float64} = nothing
-    lookup_from::Optional{Dict{String,Any}} = nothing
-    params::Optional{Dict{String,Any}} = nothing
+    params::Optional{SearchParams} = nothing
+    lookup_from::Optional{LookupLocation} = nothing
     strategy::Optional{String} = nothing
     using_::Optional{String} = nothing &(name="using",)
 end
@@ -313,6 +567,12 @@ end
     QueryRequest <: AbstractRequest
 
 Advanced query request (Qdrant universal query API).
+
+# Examples
+```julia
+QueryRequest(query=Float32[1,0,0,0], limit=5)
+QueryRequest(query=Float32[1,0,0,0], limit=10, using_="image", with_payload=true)
+```
 """
 StructUtils.@kwarg struct QueryRequest <: AbstractRequest
     query::Optional{Union{Vector{Float32}, Vector{Float64}, String, Dict{String,Any}}} = nothing
@@ -324,22 +584,32 @@ StructUtils.@kwarg struct QueryRequest <: AbstractRequest
     score_threshold::Optional{Float64} = nothing
     using_::Optional{String} = nothing &(name="using",)
     prefetch::Optional{Union{Dict{String,Any}, Vector{Any}}} = nothing
-    params::Optional{Dict{String,Any}} = nothing
+    params::Optional{SearchParams} = nothing
+    lookup_from::Optional{LookupLocation} = nothing
 end
 
 """
     DiscoverRequest <: AbstractRequest
 
 Discovery request — find points near a target with optional context.
+
+# Examples
+```julia
+DiscoverRequest(target=Float32[1,0,0,0], limit=5,
+    context=[Dict("positive" => 1, "negative" => 3)])
+```
 """
 StructUtils.@kwarg struct DiscoverRequest <: AbstractRequest
-    target::Union{PointId, Vector{Float32}, Vector{Float64}, Dict{String,Any}}
+    target::Union{PointId, Vector{Float32}, Vector{Float64}}
     limit::Int
     context::Optional{Vector{Any}} = nothing
     filter::Optional{Filter} = nothing
     offset::Optional{Int} = nothing
     with_payload::Optional{Union{Bool, Vector{String}}} = nothing
     with_vector::Optional{Union{Bool, Vector{String}}} = nothing
+    params::Optional{SearchParams} = nothing
+    using_::Optional{String} = nothing &(name="using",)
+    lookup_from::Optional{LookupLocation} = nothing
 end
 
 # ============================================================================
@@ -350,6 +620,11 @@ end
     TextIndexParams <: AbstractConfig
 
 Configuration for full-text index on a payload field.
+
+# Examples
+```julia
+TextIndexParams(tokenizer="word", lowercase=true)
+```
 """
 StructUtils.@kwarg struct TextIndexParams <: AbstractConfig
     type::String = "text"

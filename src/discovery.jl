@@ -20,7 +20,7 @@ Execute multiple discovery requests in one call.
 """
 function discover_batch(c::QdrantConnection, collection::AbstractString,
                         requests::AbstractVector{DiscoverRequest})
-    body = Dict{String,Any}("searches" => [to_dict(r) for r in requests])
+    body = Dict{String,Any}("searches" => collect(requests))
     execute(HTTP.post, c, "/collections/$collection/points/discover/batch", body)
 end
 discover_batch(collection::AbstractString, requests::AbstractVector{DiscoverRequest}) =
