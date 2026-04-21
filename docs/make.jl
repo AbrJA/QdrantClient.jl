@@ -1,12 +1,12 @@
-using Documenter, Example
+using Documenter, QdrantClient
 
-makedocs(modules = [Example],
-         sitename = "Example.jl",
+makedocs(modules = [QdrantClient],
+         sitename = "QdrantClient.jl",
          format = Documenter.HTML()
          )
 
 deploydocs(
-    repo = "github.com/JuliaLang/Example.jl.git",
+    repo = "github.com/AbrJA/QdrantClient.jl.git",
     target = "build",
     deps   = nothing,
     make   = nothing,
