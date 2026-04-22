@@ -1,4 +1,4 @@
-<![CDATA[# QdrantClient.jl
+# QdrantClient.jl
 
 A high-performance, idiomatic Julia client for the [Qdrant](https://qdrant.tech/) vector database.
 
@@ -299,4 +299,3 @@ end
 ## License
 
 MIT — see [LICENSE](LICENSE).
-]]>
