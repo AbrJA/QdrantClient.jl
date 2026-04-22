@@ -14,8 +14,9 @@ unique_name(prefix="jl") = string(prefix, "_", replace(string(uuid4()), "-" => "
 
 function qdrant_available(client::QdrantClient=CONN)
     try
-        health_check(client)
-        true
+        # `health_check` is intentionally forgiving and returns a fallback response on connection errors.
+        resp = get_version(client)
+        resp.status == "ok" && !isempty(resp.result.version)
     catch
         false
     end
