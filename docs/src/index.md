@@ -2,6 +2,8 @@
 
 A high-performance, idiomatic Julia client for the [Qdrant](https://qdrant.tech/) vector database.
 
+Supports both HTTP/REST and gRPC transports with typed responses for all endpoints.
+
 ## Installation
 
 ```julia
@@ -17,34 +19,31 @@ Requires Julia 1.12+.
 ```julia
 using QdrantClient
 
+# HTTP (default)
 client = QdrantConnection()   # localhost:6333
-# or
-client = QdrantConnection(host="qdrant.example.com", port=6333,
-                          api_key="secret", tls=true)
-# or set a global default
-set_client!(QdrantConnection())
+
+# gRPC (~2-10× faster for bulk operations)
+client = QdrantConnection(GRPCTransport(host="localhost", port=6334))
 
 # Create a collection
 create_collection(client, "demo",
     CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
+# => true
 
 # Upsert points
-upsert_points(client, "demo", [
+resp = upsert_points(client, "demo", [
     Point(id=1, vector=Float32[1, 0, 0, 0], payload=Dict("color" => "red")),
     Point(id=2, vector=Float32[0, 1, 0, 0], payload=Dict("color" => "blue")),
-    Point(id=3, vector=Float32[0, 0, 1, 0], payload=Dict("color" => "green")),
 ]; wait=true)
+# => UpdateResponse(operation_id=0, status="completed")
 
-# Search
-hits = search_points(client, "demo",
-    SearchRequest(vector=Float32[1, 0, 0, 0], limit=2, with_payload=true))
-
-# Universal query
-results = query_points(client, "demo",
-    QueryRequest(query=Float32[1, 0, 0, 0], limit=2))
+# Query (universal API — replaces search/recommend/discover)
+results = query_points(client, "demo";
+    query=Float32[1, 0, 0, 0], limit=2, with_payload=true)
+# => QueryResponse with results.points::Vector{ScoredPoint}
 
 # Cleanup
-delete_collection(client, "demo")
+delete_collection(client, "demo")  # => true
 ```
 
 ---
@@ -54,6 +53,7 @@ delete_collection(client, "demo")
 ```@docs
 QdrantConnection
 HTTPTransport
+GRPCTransport
 AbstractTransport
 set_client!
 get_client
@@ -97,6 +97,7 @@ delete_alias
 ```@docs
 upsert_points
 get_points
+get_point
 delete_points
 ```
 
@@ -104,6 +105,7 @@ delete_points
 
 ```@docs
 set_payload
+overwrite_payload
 delete_payload
 clear_payload
 ```
@@ -137,27 +139,10 @@ delete_payload_index
 
 ---
 
-## Search
-
-```@docs
-search_points
-search_batch
-search_groups
-```
-
----
-
-## Recommendations
-
-```@docs
-recommend_points
-recommend_batch
-recommend_groups
-```
-
----
-
 ## Query (Universal API)
+
+The `query_points` endpoint replaces the deprecated `search_points`, `recommend_points`,
+and `discover_points` functions from v0.x.
 
 ```@docs
 query_points
@@ -167,11 +152,19 @@ query_groups
 
 ---
 
-## Discovery
+## Faceted Search
 
 ```@docs
-discover_points
-discover_batch
+facet
+```
+
+---
+
+## Search Matrix
+
+```@docs
+search_matrix_pairs
+search_matrix_offsets
 ```
 
 ---
@@ -182,6 +175,9 @@ discover_batch
 create_snapshot
 list_snapshots
 delete_snapshot
+create_full_snapshot
+list_full_snapshots
+delete_full_snapshot
 ```
 
 ---
@@ -191,8 +187,30 @@ delete_snapshot
 ```@docs
 cluster_status
 health_check
+get_version
 get_metrics
 get_telemetry
+```
+
+---
+
+## Response Types
+
+```@docs
+UpdateResponse
+QueryResponse
+ScoredPoint
+ScrollResponse
+Record
+CountResponse
+GroupsResponse
+GroupResult
+SnapshotInfo
+CollectionDescription
+AliasDescription
+HealthResponse
+FacetResponse
+FacetHit
 ```
 
 ---
@@ -206,7 +224,6 @@ Optional
 PointId
 AbstractQdrantType
 AbstractConfig
-AbstractRequest
 AbstractCondition
 ```
 
@@ -221,7 +238,6 @@ Distance
 ```@docs
 CollectionConfig
 CollectionUpdate
-CollectionParamsDiff
 VectorParams
 SparseVectorParams
 HnswConfig
@@ -233,12 +249,8 @@ OptimizersConfig
 
 ```@docs
 ScalarQuantization
-ScalarQuantizationConfig
 ProductQuantization
-ProductQuantizationConfig
 BinaryQuantization
-BinaryQuantizationConfig
-QuantizationSearchParams
 ```
 
 ### Points
@@ -266,21 +278,20 @@ IsNullCondition
 ### Requests
 
 ```@docs
-SearchRequest
-SearchParams
-RecommendRequest
 QueryRequest
-DiscoverRequest
+SearchParams
 TextIndexParams
 ```
 
 ---
 
-## Serialization
+## gRPC Limitations
 
-```@docs
-serialize_body
-```
+Due to Proto3 wire format constraints:
+
+- **`create_payload_index` with `"keyword"` type** — Proto3 does not send the default enum value (`FieldType.FieldTypeKeyword = 0`) over the wire, so keyword indexes are silently created as integer indexes. Use HTTP transport for keyword indexes.
+- **`get_point` (single point)** — Not available over gRPC; use `get_points(client, collection, [id])`.
+- **Snapshot download** — gRPC snapshot operations create/list/delete but cannot download snapshot files.
 
 ---
 
@@ -288,32 +299,34 @@ serialize_body
 
 QdrantClient.jl is organized around three principles:
 
-**Flat, discoverable API.** Every operation is a top-level function — `search_points`,
+**Flat, discoverable API.** Every operation is a top-level function — `query_points`,
 `upsert_points`, `create_collection`. Functions are grouped by noun, not verb, so
-`<TAB>` completion after `search_` shows everything related to search.
+`<TAB>` completion after `query_` shows everything related to queries.
 
 **Explicit client or global default.** Every function accepts an optional leading
 `QdrantConnection` argument. When omitted the global default (set via `set_client!`)
-is used. This means you can write scripts with a single `set_client!` call and never
-pass the client again, or pass it explicitly in multi-tenant code.
+is used.
 
-**Zero-cost JSON mapping.** Structs are annotated with `StructUtils.@kwarg` and
-serialized by `JSON.json(x; omit_null=true, omit_empty=true)`. `nothing` fields and
-empty collections are stripped automatically, so the wire format stays clean without
-manual `to_dict` conversion.
+**Typed responses.** All endpoints return concrete Julia structs (`UpdateResponse`,
+`QueryResponse`, `ScrollResponse`, etc.) for type-stable downstream code. No more
+indexing into `Dict{String,Any}`.
 
 ### Module layout
 
 | File | Contents |
 |------|----------|
-| `src/QdrantClient.jl` | Transport, connection, serialization, exports |
-| `src/types.jl` | All struct definitions |
+| `src/QdrantClient.jl` | Transport, connection, typed parsers, exports |
+| `src/types.jl` | All struct definitions (request & response types) |
 | `src/error.jl` | `QdrantError` |
 | `src/collections.jl` | Collections & aliases API |
 | `src/points.jl` | Points, payload, vectors, scroll, count, index |
-| `src/search.jl` | Search, recommend, query |
-| `src/discovery.jl` | Discovery |
+| `src/query.jl` | Query, query batch, query groups, facet, search matrix |
 | `src/snapshots.jl` | Snapshots |
 | `src/distributed.jl` | Cluster status |
 | `src/service.jl` | Health, metrics, telemetry |
-
+| `src/grpc_transport.jl` | gRPC transport layer |
+| `src/grpc_collections.jl` | gRPC collection operations |
+| `src/grpc_points.jl` | gRPC point operations |
+| `src/grpc_query.jl` | gRPC query operations |
+| `src/grpc_snapshots.jl` | gRPC snapshot operations |
+| `src/grpc_service.jl` | gRPC service operations |

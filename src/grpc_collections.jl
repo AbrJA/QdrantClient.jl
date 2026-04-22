@@ -7,8 +7,7 @@
 function list_collections(c::QdrantConnection, ::Val{:grpc})
     transport = c.transport::GRPCTransport
     resp = grpc_request(transport, Collections_List_Client, qdrant.ListCollectionsRequest())
-    collections = [Dict{String,Any}("name" => cd.name) for cd in resp.collections]
-    Dict{String,Any}("collections" => collections)
+    CollectionDescription[CollectionDescription(cd.name) for cd in resp.collections]
 end
 
 # ── Create Collection ────────────────────────────────────────────────────
@@ -21,17 +20,17 @@ function create_collection(c::QdrantConnection, name::AbstractString,
         to_proto_hnsw_config(config.hnsw_config),      # hnsw_config
         to_proto_wal_config(config.wal_config),        # wal_config
         to_proto_optimizers_config(config.optimizers_config), # optimizers_config
-        config.shard_number !== nothing ? UInt32(config.shard_number) : UInt32(0), # shard_number
-        config.on_disk_payload !== nothing ? config.on_disk_payload : false, # on_disk_payload
+        config.shard_number !== nothing ? UInt32(config.shard_number) : UInt32(0),
+        config.on_disk_payload !== nothing ? config.on_disk_payload : false,
         UInt64(0),                                     # timeout
         to_proto_vectors_config(config.vectors),       # vectors_config
-        config.replication_factor !== nothing ? UInt32(config.replication_factor) : UInt32(0), # replication_factor
-        config.write_consistency_factor !== nothing ? UInt32(config.write_consistency_factor) : UInt32(0), # write_consistency_factor
+        config.replication_factor !== nothing ? UInt32(config.replication_factor) : UInt32(0),
+        config.write_consistency_factor !== nothing ? UInt32(config.write_consistency_factor) : UInt32(0),
         nothing,                                       # quantization_config
         config.sharding_method !== nothing ? (
             config.sharding_method == "custom" ? qdrant.var"ShardingMethod".Custom :
             qdrant.var"ShardingMethod".Auto
-        ) : qdrant.var"ShardingMethod".Auto,           # sharding_method
+        ) : qdrant.var"ShardingMethod".Auto,
         nothing,                                       # sparse_vectors_config
         nothing,                                       # strict_mode_config
         Dict{String,qdrant.Value}(),                   # metadata
@@ -55,7 +54,7 @@ function collection_exists(c::QdrantConnection, name::AbstractString, ::Val{:grp
     transport = c.transport::GRPCTransport
     req = qdrant.CollectionExistsRequest(name)
     resp = grpc_request(transport, Collections_CollectionExists_Client, req)
-    Dict{String,Any}("exists" => resp.result !== nothing ? resp.result.exists : false)
+    resp.result !== nothing ? resp.result.exists : false
 end
 
 # ── Get Collection ───────────────────────────────────────────────────────
@@ -98,16 +97,16 @@ function update_collection(c::QdrantConnection, name::AbstractString,
                            config::CollectionUpdate, ::Val{:grpc})
     transport = c.transport::GRPCTransport
     req = qdrant.UpdateCollection(
-        name,                                              # collection_name
+        name,
         to_proto_optimizers_config(config.optimizers_config),
-        UInt64(0),                                         # timeout
-        nothing,                                           # params
+        UInt64(0),
+        nothing,
         to_proto_hnsw_config(config.hnsw_config),
-        nothing,                                           # vectors_config
-        nothing,                                           # quantization_config
-        nothing,                                           # sparse_vectors_config
-        nothing,                                           # strict_mode_config
-        Dict{String,qdrant.Value}(),                       # metadata
+        nothing,
+        nothing,
+        nothing,
+        nothing,
+        Dict{String,qdrant.Value}(),
     )
     resp = grpc_request(transport, Collections_Update_Client, req)
     resp.result
@@ -118,18 +117,14 @@ end
 function list_aliases(c::QdrantConnection, ::Val{:grpc})
     transport = c.transport::GRPCTransport
     resp = grpc_request(transport, Collections_ListAliases_Client, qdrant.ListAliasesRequest())
-    aliases = [Dict{String,Any}("alias_name" => a.alias_name, "collection_name" => a.collection_name)
-               for a in resp.aliases]
-    Dict{String,Any}("aliases" => aliases)
+    AliasDescription[AliasDescription(a.alias_name, a.collection_name) for a in resp.aliases]
 end
 
 function list_collection_aliases(c::QdrantConnection, name::AbstractString, ::Val{:grpc})
     transport = c.transport::GRPCTransport
     req = qdrant.ListCollectionAliasesRequest(name)
     resp = grpc_request(transport, Collections_ListCollectionAliases_Client, req)
-    aliases = [Dict{String,Any}("alias_name" => a.alias_name, "collection_name" => a.collection_name)
-               for a in resp.aliases]
-    Dict{String,Any}("aliases" => aliases)
+    AliasDescription[AliasDescription(a.alias_name, a.collection_name) for a in resp.aliases]
 end
 
 function create_alias(c::QdrantConnection, alias::AbstractString,
@@ -159,16 +154,4 @@ function rename_alias(c::QdrantConnection, old::AbstractString,
     req = qdrant.ChangeAliases([action], UInt64(0))
     resp = grpc_request(transport, Collections_UpdateAliases_Client, req)
     resp.result
-end
-
-# ── Cluster Info ─────────────────────────────────────────────────────────
-
-function cluster_info(c::QdrantConnection, name::AbstractString, ::Val{:grpc})
-    transport = c.transport::GRPCTransport
-    req = qdrant.CollectionClusterInfoRequest(name)
-    resp = grpc_request(transport, Collections_CollectionClusterInfo_Client, req)
-    Dict{String,Any}(
-        "peer_id" => Int(resp.peer_id),
-        "shard_count" => Int(resp.shard_count),
-    )
 end

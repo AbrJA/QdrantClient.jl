@@ -1,5 +1,5 @@
 # ============================================================================
-# gRPC Tests for QdrantClient.jl
+# gRPC Tests for QdrantClient.jl v1.0
 # ============================================================================
 
 using Test
@@ -83,22 +83,18 @@ end
 
     # ── PointId Conversion ──────────────────────────────────────────────
     @testset "PointId conversion" begin
-        # Int roundtrip
         pid_int = to_proto_point_id(42)
         @test pid_int isa qdrant.PointId
         @test from_proto_point_id(pid_int) == 42
 
-        # Large int
         pid_large = to_proto_point_id(typemax(Int64))
         @test from_proto_point_id(pid_large) == typemax(Int64)
 
-        # UUID roundtrip
         u = uuid4()
         pid_uuid = to_proto_point_id(u)
         @test pid_uuid isa qdrant.PointId
         @test from_proto_point_id(pid_uuid) == u
 
-        # Zero
         pid_zero = to_proto_point_id(0)
         @test from_proto_point_id(pid_zero) == 0
     end
@@ -113,41 +109,29 @@ end
 
     # ── Value Conversion ────────────────────────────────────────────────
     @testset "Value conversion roundtrips" begin
-        # Null
         @test proto_value_to_julia(julia_value_to_proto(nothing)) === nothing
-
-        # Bool
         @test proto_value_to_julia(julia_value_to_proto(true)) === true
         @test proto_value_to_julia(julia_value_to_proto(false)) === false
-
-        # Integer
         @test proto_value_to_julia(julia_value_to_proto(42)) == 42
         @test proto_value_to_julia(julia_value_to_proto(0)) == 0
         @test proto_value_to_julia(julia_value_to_proto(-100)) == -100
 
-        # Float
         v = proto_value_to_julia(julia_value_to_proto(3.14))
         @test v ≈ 3.14
 
-        # String
         @test proto_value_to_julia(julia_value_to_proto("hello")) == "hello"
         @test proto_value_to_julia(julia_value_to_proto("")) == ""
-
-        # List
         @test proto_value_to_julia(julia_value_to_proto([1, 2, 3])) == [1, 2, 3]
         @test proto_value_to_julia(julia_value_to_proto(["a", "b"])) == ["a", "b"]
 
-        # Nested list
         nested = [[1, 2], [3, 4]]
         @test proto_value_to_julia(julia_value_to_proto(nested)) == nested
 
-        # Dict
         d = Dict("a" => 1, "b" => "two")
         result = proto_value_to_julia(julia_value_to_proto(d))
         @test result["a"] == 1
         @test result["b"] == "two"
 
-        # Nested dict
         nd = Dict("outer" => Dict("inner" => 42))
         result = proto_value_to_julia(julia_value_to_proto(nd))
         @test result["outer"]["inner"] == 42
@@ -163,24 +147,20 @@ end
         @test result["count"] == 5
         @test result["tags"] == ["a", "b"]
 
-        # Nothing payload
         @test to_proto_payload(nothing) == Dict{String,qdrant.Value}()
     end
 
     # ── Vector Conversion ───────────────────────────────────────────────
     @testset "Vector conversion" begin
-        # Dense vector
         v = Float32[1.0, 2.0, 3.0, 4.0]
         proto_v = to_proto_vectors(v)
         @test proto_v isa qdrant.Vectors
         @test proto_v.vectors_options.name === :vector
 
-        # NamedVector
         nv = NamedVector(name="image", vector=Float32[1.0, 0.0])
         proto_nv = to_proto_vectors(nv)
         @test proto_nv.vectors_options.name === :vectors
 
-        # Dict of vectors
         dv = Dict("text" => Float32[1.0, 0.0], "image" => Float32[0.0, 1.0])
         proto_dv = to_proto_vectors(dv)
         @test proto_dv.vectors_options.name === :vectors
@@ -194,7 +174,6 @@ end
         @test proto_p isa qdrant.PointStruct
         @test from_proto_point_id(proto_p.id) == 42
 
-        # UUID point
         u = uuid4()
         p2 = Point(id=u, vector=Float32[1.0, 0.0, 0.0, 0.0])
         proto_p2 = to_proto_point(p2)
@@ -203,46 +182,37 @@ end
 
     # ── Filter Conversion ───────────────────────────────────────────────
     @testset "Filter conversion" begin
-        # Null filter
         @test to_proto_filter(nothing) === nothing
 
-        # Simple must filter with MatchValue
         f = Filter(must=[FieldCondition(key="color", match=MatchValue(value="red"))])
         proto_f = to_proto_filter(f)
         @test proto_f isa qdrant.Filter
         @test length(proto_f.must) == 1
 
-        # MatchAny with strings
         f2 = Filter(must=[FieldCondition(key="tag", match=MatchAny(any=["a", "b"]))])
         proto_f2 = to_proto_filter(f2)
         @test length(proto_f2.must) == 1
 
-        # MatchAny with integers
         f3 = Filter(must=[FieldCondition(key="n", match=MatchAny(any=[1, 2, 3]))])
         proto_f3 = to_proto_filter(f3)
         @test length(proto_f3.must) == 1
 
-        # MatchText
         f4 = Filter(must=[FieldCondition(key="desc", match=MatchText(text="hello"))])
         proto_f4 = to_proto_filter(f4)
         @test length(proto_f4.must) == 1
 
-        # HasIdCondition
         f5 = Filter(must=[HasIdCondition(has_id=[1, 2])])
         proto_f5 = to_proto_filter(f5)
         @test length(proto_f5.must) == 1
 
-        # IsEmptyCondition
         f6 = Filter(must=[IsEmptyCondition(is_empty=Dict("key" => "field"))])
         proto_f6 = to_proto_filter(f6)
         @test length(proto_f6.must) == 1
 
-        # IsNullCondition
         f7 = Filter(must=[IsNullCondition(is_null=Dict("key" => "field"))])
         proto_f7 = to_proto_filter(f7)
         @test length(proto_f7.must) == 1
 
-        # Combined must + must_not
         f8 = Filter(
             must=[FieldCondition(key="a", match=MatchValue(value="x"))],
             must_not=[FieldCondition(key="b", match=MatchValue(value="y"))]
@@ -251,7 +221,6 @@ end
         @test length(proto_f8.must) == 1
         @test length(proto_f8.must_not) == 1
 
-        # RangeCondition
         f9 = Filter(must=[FieldCondition(key="price",
             range=RangeCondition(gte=10.0, lte=100.0))])
         proto_f9 = to_proto_filter(f9)
@@ -287,20 +256,16 @@ end
 
     # ── Points Selector ─────────────────────────────────────────────────
     @testset "Points selector conversion" begin
-        # IDs selector
         sel_ids = to_proto_points_selector([1, 2, 3])
         @test sel_ids isa qdrant.PointsSelector
 
-        # Single ID
         sel_single = to_proto_points_selector(42)
         @test sel_single isa qdrant.PointsSelector
 
-        # UUID IDs
         u1, u2 = uuid4(), uuid4()
         sel_uuids = to_proto_points_selector([u1, u2])
         @test sel_uuids isa qdrant.PointsSelector
 
-        # Filter selector
         f = Filter(must=[FieldCondition(key="k", match=MatchValue(value="v"))])
         sel_filter = to_proto_points_selector(f)
         @test sel_filter isa qdrant.PointsSelector
@@ -313,7 +278,6 @@ end
         @test proto_vp isa qdrant.VectorParams
         @test proto_vp.size == 128
 
-        # With HNSW config
         vp2 = VectorParams(size=64, distance=Dot,
             hnsw_config=HnswConfig(m=32, ef_construct=200))
         proto_vp2 = to_proto_vector_params(vp2)
@@ -321,11 +285,9 @@ end
     end
 
     @testset "VectorsConfig conversion" begin
-        # Single vector config
         vc = to_proto_vectors_config(VectorParams(size=4, distance=Cosine))
         @test vc isa qdrant.VectorsConfig
 
-        # Named vectors config
         named = Dict("text" => VectorParams(size=128, distance=Cosine),
                      "image" => VectorParams(size=256, distance=Dot))
         vc2 = to_proto_vectors_config(named)
@@ -369,35 +331,29 @@ end  # gRPC Unit Tests
     # ── Health Check ────────────────────────────────────────────────────
     @testset "Health Check (gRPC)" begin
         result = health_check(GRPC_CONN)
-        @test result isa Dict
-        @test haskey(result, "title")
+        @test result isa HealthResponse
+        @test contains(result.title, "qdrant")
+        @test !isempty(result.version)
     end
 
     # ── Collection Lifecycle ────────────────────────────────────────────
     @testset "Collection Lifecycle (gRPC)" begin
         name = unique_name("grpc_coll")
         try
-            # Create
             config = CollectionConfig(vectors=VectorParams(size=4, distance=Cosine))
-            create_collection(GRPC_CONN, name, config)
+            @test create_collection(GRPC_CONN, name, config) === true
 
-            # Exists
-            exists = collection_exists(GRPC_CONN, name)
-            @test exists["exists"] == true
+            @test collection_exists(GRPC_CONN, name) === true
 
-            # List
-            result = list_collections(GRPC_CONN)
-            collections = result isa Dict ? get(result, "collections", result) : result
-            coll_names = [c isa Dict ? get(c, "name", "") : string(c) for c in collections]
-            @test name in coll_names
+            colls = list_collections(GRPC_CONN)
+            @test colls isa Vector{CollectionDescription}
+            @test name in [c.name for c in colls]
 
-            # Get info
             info = get_collection(GRPC_CONN, name)
             @test info !== nothing
 
-            # Delete
-            delete_collection(GRPC_CONN, name)
-            @test collection_exists(GRPC_CONN, name)["exists"] == false
+            @test delete_collection(GRPC_CONN, name) === true
+            @test collection_exists(GRPC_CONN, name) === false
         finally
             cleanup_collection(GRPC_CONN, name)
         end
@@ -410,30 +366,27 @@ end  # gRPC Unit Tests
             create_collection(GRPC_CONN, name,
                 CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
 
-            # Upsert
             pts = fixture_points()
-            upsert_points(GRPC_CONN, name, pts)
+            res = upsert_points(GRPC_CONN, name, pts)
+            @test res isa UpdateResponse
+            @test res.status == "completed"
 
-            # Count
             cnt = count_points(GRPC_CONN, name; exact=true)
-            @test cnt isa Dict || cnt isa Integer
-            count_val = cnt isa Dict ? get(cnt, "count", 0) : cnt
-            @test count_val == 3
+            @test cnt isa CountResponse
+            @test cnt.count == 3
 
-            # Get by IDs
             result = get_points(GRPC_CONN, name, [1, 2]; with_payload=true, with_vectors=true)
             @test length(result) == 2
+            @test result[1] isa Record
+            @test result[1].id in [1, 2]
 
-            # Scroll
             scroll_result = scroll_points(GRPC_CONN, name; limit=10, with_payload=true)
-            points = scroll_result isa Dict ? get(scroll_result, "points", scroll_result) : scroll_result
-            @test length(points) >= 3
+            @test scroll_result isa ScrollResponse
+            @test length(scroll_result.points) >= 3
 
-            # Delete single point
             delete_points(GRPC_CONN, name, [3])
             cnt2 = count_points(GRPC_CONN, name; exact=true)
-            count_val2 = cnt2 isa Dict ? get(cnt2, "count", 0) : cnt2
-            @test count_val2 == 2
+            @test cnt2.count == 2
         finally
             cleanup_collection(GRPC_CONN, name)
         end
@@ -447,83 +400,98 @@ end  # gRPC Unit Tests
                 CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
             upsert_points(GRPC_CONN, name, fixture_points())
 
-            # Set payload
-            set_payload(GRPC_CONN, name,
+            res = set_payload(GRPC_CONN, name,
                 Dict{String,Any}("color" => "red"), [1])
+            @test res isa UpdateResponse
 
-            # Verify
             pts = get_points(GRPC_CONN, name, [1]; with_payload=true)
             @test length(pts) == 1
-            p = first(pts)
-            payload = p isa Dict ? get(p, "payload", Dict()) : p
-            @test get(payload, "color", nothing) == "red"
+            @test pts[1].payload["color"] == "red"
 
-            # Delete payload keys
             delete_payload(GRPC_CONN, name, ["color"], [1])
             pts2 = get_points(GRPC_CONN, name, [1]; with_payload=true)
-            p2 = first(pts2)
-            payload2 = p2 isa Dict ? get(p2, "payload", Dict()) : p2
-            @test !haskey(payload2, "color")
+            @test !haskey(pts2[1].payload, "color")
 
-            # Clear payload
             clear_payload(GRPC_CONN, name, [2])
             pts3 = get_points(GRPC_CONN, name, [2]; with_payload=true)
-            p3 = first(pts3)
-            payload3 = p3 isa Dict ? get(p3, "payload", Dict()) : p3
-            @test isempty(payload3)
+            @test pts3[1].payload === nothing || isempty(pts3[1].payload)
         finally
             cleanup_collection(GRPC_CONN, name)
         end
     end
 
-    # ── Search ──────────────────────────────────────────────────────────
-    @testset "Search (gRPC)" begin
-        name = unique_name("grpc_search")
+    # ── Overwrite Payload ───────────────────────────────────────────────
+    @testset "Overwrite Payload (gRPC)" begin
+        name = unique_name("grpc_overp")
         try
             create_collection(GRPC_CONN, name,
                 CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
             upsert_points(GRPC_CONN, name, fixture_points())
 
-            # Basic search
-            req = SearchRequest(vector=Float32[1.0, 0.0, 0.0, 0.0], limit=3)
-            results = search_points(GRPC_CONN, name, req)
-            @test length(results) >= 1
-            @test first(results)["id"] in [1, 2, 3]
+            res = overwrite_payload(GRPC_CONN, name,
+                Dict{String,Any}("replaced" => "yes"), [1])
+            @test res isa UpdateResponse
 
-            # Search with filter
-            req2 = SearchRequest(
-                vector=Float32[1.0, 0.0, 0.0, 0.0],
-                limit=3,
-                filter=Filter(must=[FieldCondition(key="group", match=MatchValue(value="b"))])
-            )
-            results2 = search_points(GRPC_CONN, name, req2)
-            @test length(results2) >= 1
-            @test first(results2)["id"] == 3
-
-            # Search with payload
-            req3 = SearchRequest(
-                vector=Float32[1.0, 0.0, 0.0, 0.0],
-                limit=2,
-                with_payload=true
-            )
-            results3 = search_points(GRPC_CONN, name, req3)
-            @test haskey(first(results3), "payload")
+            pts = get_points(GRPC_CONN, name, [1]; with_payload=true)
+            @test pts[1].payload["replaced"] == "yes"
+            @test !haskey(pts[1].payload, "group")
         finally
             cleanup_collection(GRPC_CONN, name)
         end
     end
 
-    # ── Recommend ───────────────────────────────────────────────────────
-    @testset "Recommend (gRPC)" begin
-        name = unique_name("grpc_rec")
+    # ── Query Points ────────────────────────────────────────────────────
+    @testset "Query Points (gRPC)" begin
+        name = unique_name("grpc_query")
         try
             create_collection(GRPC_CONN, name,
                 CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
             upsert_points(GRPC_CONN, name, fixture_points())
 
-            req = RecommendRequest(positive=[1], limit=2)
-            results = recommend_points(GRPC_CONN, name, req)
-            @test length(results) >= 1
+            qr = query_points(GRPC_CONN, name,
+                QueryRequest(query=Float32[1.0, 0.0, 0.0, 0.0], limit=3))
+            @test qr isa QueryResponse
+            @test length(qr.points) >= 1
+            @test qr.points[1] isa ScoredPoint
+            @test qr.points[1].id in [1, 2, 3]
+
+            # Query with filter
+            qr2 = query_points(GRPC_CONN, name,
+                QueryRequest(
+                    query=Float32[1.0, 0.0, 0.0, 0.0],
+                    limit=3,
+                    filter=Filter(must=[FieldCondition(key="group", match=MatchValue(value="b"))])
+                ))
+            @test length(qr2.points) >= 1
+            @test qr2.points[1].id == 3
+
+            # Query with payload
+            qr3 = query_points(GRPC_CONN, name,
+                QueryRequest(
+                    query=Float32[1.0, 0.0, 0.0, 0.0],
+                    limit=2, with_payload=true))
+            @test qr3.points[1].payload !== nothing
+        finally
+            cleanup_collection(GRPC_CONN, name)
+        end
+    end
+
+    # ── Query Batch ─────────────────────────────────────────────────────
+    @testset "Query Batch (gRPC)" begin
+        name = unique_name("grpc_qbatch")
+        try
+            create_collection(GRPC_CONN, name,
+                CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
+            upsert_points(GRPC_CONN, name, fixture_points())
+
+            qb = query_batch(GRPC_CONN, name, [
+                QueryRequest(query=Float32[1, 0, 0, 0], limit=2),
+                QueryRequest(query=Float32[0, 1, 0, 0], limit=1),
+            ])
+            @test length(qb) == 2
+            @test qb[1] isa QueryResponse
+            @test length(qb[1].points) == 2
+            @test length(qb[2].points) == 1
         finally
             cleanup_collection(GRPC_CONN, name)
         end
@@ -539,8 +507,8 @@ end  # gRPC Unit Tests
 
             f = Filter(must=[FieldCondition(key="group", match=MatchValue(value="a"))])
             result = scroll_points(GRPC_CONN, name; filter=f, limit=10, with_payload=true)
-            points = result isa Dict ? get(result, "points", result) : result
-            @test length(points) == 2
+            @test result isa ScrollResponse
+            @test length(result.points) == 2
         finally
             cleanup_collection(GRPC_CONN, name)
         end
@@ -554,12 +522,13 @@ end  # gRPC Unit Tests
                 CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
             upsert_points(GRPC_CONN, name, fixture_points())
 
-            # Create index (gRPC requires explicit field type; "keyword" maps to proto
-            # enum value 0 which proto3 skips encoding, so use "integer" for the "n" field)
-            create_payload_index(GRPC_CONN, name, "n"; field_schema="integer")
+            # Note: gRPC "keyword" maps to proto enum 0 which proto3 skips encoding,
+            # so use "integer" for the "n" field
+            res = create_payload_index(GRPC_CONN, name, "n"; field_schema="integer")
+            @test res isa UpdateResponse
 
-            # Delete index
-            delete_payload_index(GRPC_CONN, name, "n")
+            res2 = delete_payload_index(GRPC_CONN, name, "n")
+            @test res2 isa UpdateResponse
         finally
             cleanup_collection(GRPC_CONN, name)
         end
@@ -572,18 +541,14 @@ end  # gRPC Unit Tests
             create_collection(GRPC_CONN, name,
                 CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
 
-            # Create snapshot
             snap = create_snapshot(GRPC_CONN, name)
-            @test snap !== nothing
+            @test snap isa SnapshotInfo
 
-            # List snapshots
             snaps = list_snapshots(GRPC_CONN, name)
+            @test snaps isa Vector{SnapshotInfo}
             @test length(snaps) >= 1
 
-            # Delete snapshot
-            snap_name = snaps isa AbstractVector ? first(snaps) : first(snaps)
-            snap_name_str = snap_name isa Dict ? snap_name["name"] : string(snap_name)
-            delete_snapshot(GRPC_CONN, name, snap_name_str)
+            delete_snapshot(GRPC_CONN, name, snaps[1].name)
         finally
             cleanup_collection(GRPC_CONN, name)
         end
@@ -597,19 +562,16 @@ end  # gRPC Unit Tests
             create_collection(GRPC_CONN, name,
                 CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
 
-            # Create alias
-            create_alias(GRPC_CONN, alias, name)
+            @test create_alias(GRPC_CONN, alias, name) === true
 
-            # List aliases
             aliases = list_aliases(GRPC_CONN)
-            @test aliases !== nothing
+            @test aliases isa Vector{AliasDescription}
+            @test any(a.alias_name == alias for a in aliases)
 
-            # List collection aliases
             col_aliases = list_collection_aliases(GRPC_CONN, name)
-            @test col_aliases !== nothing
+            @test col_aliases isa Vector{AliasDescription}
 
-            # Delete alias
-            delete_alias(GRPC_CONN, alias)
+            @test delete_alias(GRPC_CONN, alias) === true
         finally
             try; delete_alias(GRPC_CONN, alias); catch; end
             cleanup_collection(GRPC_CONN, name)
@@ -624,13 +586,12 @@ end  # gRPC Unit Tests
                 CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
             upsert_points(GRPC_CONN, name, fixture_points())
 
-            # Delete points matching filter
             f = Filter(must=[FieldCondition(key="group", match=MatchValue(value="b"))])
-            delete_points(GRPC_CONN, name, f)
+            res = delete_points(GRPC_CONN, name, f)
+            @test res isa UpdateResponse
 
             cnt = count_points(GRPC_CONN, name; exact=true)
-            count_val = cnt isa Dict ? get(cnt, "count", 0) : cnt
-            @test count_val == 2
+            @test cnt.count == 2
         finally
             cleanup_collection(GRPC_CONN, name)
         end
@@ -646,30 +607,23 @@ end  # gRPC Unit Tests
             # Create via HTTP, verify via gRPC
             create_collection(HTTP_CONN, name,
                 CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
-            @test collection_exists(GRPC_CONN, name)["exists"] == true
+            @test collection_exists(GRPC_CONN, name) === true
 
             # Upsert via HTTP
             upsert_points(HTTP_CONN, name, fixture_points())
 
             # Count via gRPC
             cnt = count_points(GRPC_CONN, name; exact=true)
-            count_val = cnt isa Dict ? get(cnt, "count", 0) : cnt
-            @test count_val == 3
+            @test cnt.count == 3
 
-            # Search via both, compare results
-            req = SearchRequest(vector=Float32[1.0, 0.0, 0.0, 0.0], limit=3)
-            http_results = search_points(HTTP_CONN, name, req)
-            grpc_results = search_points(GRPC_CONN, name, req)
+            # Query via both, compare results
+            http_qr = query_points(HTTP_CONN, name,
+                QueryRequest(query=Float32[1.0, 0.0, 0.0, 0.0], limit=3))
+            grpc_qr = query_points(GRPC_CONN, name,
+                QueryRequest(query=Float32[1.0, 0.0, 0.0, 0.0], limit=3))
 
-            # Both should return same number of results
-            @test length(http_results) == length(grpc_results)
-
-            # Top result should be same point
-            http_top = http_results[1]
-            grpc_top = grpc_results[1]
-            http_id = http_top isa AbstractDict ? http_top["id"] : http_top
-            grpc_id = grpc_top isa AbstractDict ? grpc_top["id"] : grpc_top
-            @test Int(http_id) == Int(grpc_id)
+            @test length(http_qr.points) == length(grpc_qr.points)
+            @test Int(http_qr.points[1].id) == Int(grpc_qr.points[1].id)
 
             # Upsert via gRPC, read via HTTP
             extra_pt = Point(id=99, vector=Float32[0.5, 0.5, 0.0, 0.0],
@@ -678,11 +632,11 @@ end  # gRPC Unit Tests
 
             http_pts = get_points(HTTP_CONN, name, [99]; with_payload=true)
             @test length(http_pts) == 1
+            @test http_pts[1].payload["source"] == "grpc"
 
             # Delete via gRPC
             delete_collection(GRPC_CONN, name)
-            exists_result = collection_exists(HTTP_CONN, name)
-            @test exists_result["exists"] == false
+            @test collection_exists(HTTP_CONN, name) === false
         finally
             cleanup_collection(HTTP_CONN, name)
         end

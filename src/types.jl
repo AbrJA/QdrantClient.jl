@@ -38,7 +38,7 @@ abstract type AbstractConfig <: AbstractQdrantType end
 """
     AbstractRequest <: AbstractQdrantType
 
-Request types for search/query/recommend/discover endpoints.
+Request types for query endpoints.
 """
 abstract type AbstractRequest <: AbstractQdrantType end
 
@@ -48,6 +48,13 @@ abstract type AbstractRequest <: AbstractQdrantType end
 Filter condition types.
 """
 abstract type AbstractCondition <: AbstractQdrantType end
+
+"""
+    AbstractResponse <: AbstractQdrantType
+
+Typed response types returned from API calls.
+"""
+abstract type AbstractResponse <: AbstractQdrantType end
 
 # ============================================================================
 # Distance Enum
@@ -509,69 +516,29 @@ StructUtils.@kwarg struct Filter <: AbstractCondition
 end
 
 # ============================================================================
-# Search / Recommend / Query / Discover Requests
+# Query Request (Universal API — replaces deprecated search/recommend/discover)
 # ============================================================================
-
-"""
-    SearchRequest <: AbstractRequest
-
-Nearest-neighbor search request.
-
-# Examples
-```julia
-SearchRequest(vector=Float32[1,0,0,0], limit=10)
-SearchRequest(vector=Float32[1,0,0,0], limit=5, with_payload=true)
-SearchRequest(vector=NamedVector(name="image", vector=Float32[1,0,0,0]), limit=5)
-SearchRequest(vector=Float32[1,0,0,0], limit=10, params=SearchParams(exact=true))
-```
-"""
-StructUtils.@kwarg struct SearchRequest <: AbstractRequest
-    vector::Union{Vector{Float32}, Vector{Float64}, NamedVector, String}
-    limit::Int
-    filter::Optional{Filter} = nothing
-    offset::Optional{Int} = nothing
-    with_payload::Optional{Union{Bool, Vector{String}}} = nothing
-    with_vector::Optional{Union{Bool, Vector{String}}} = nothing
-    score_threshold::Optional{Float64} = nothing
-    params::Optional{SearchParams} = nothing
-    lookup_from::Optional{LookupLocation} = nothing
-end
-
-"""
-    RecommendRequest <: AbstractRequest
-
-Recommendation request based on positive/negative examples.
-
-# Examples
-```julia
-RecommendRequest(positive=[1, 2], limit=5)
-RecommendRequest(positive=[1], negative=[3], limit=10, using_="image")
-```
-"""
-StructUtils.@kwarg struct RecommendRequest <: AbstractRequest
-    positive::Optional{Vector{Any}} = nothing
-    negative::Optional{Vector{Any}} = nothing
-    limit::Int
-    filter::Optional{Filter} = nothing
-    offset::Optional{Int} = nothing
-    with_payload::Optional{Union{Bool, Vector{String}}} = nothing
-    with_vector::Optional{Union{Bool, Vector{String}}} = nothing
-    score_threshold::Optional{Float64} = nothing
-    params::Optional{SearchParams} = nothing
-    lookup_from::Optional{LookupLocation} = nothing
-    strategy::Optional{String} = nothing
-    using_::Optional{String} = nothing &(name="using",)
-end
 
 """
     QueryRequest <: AbstractRequest
 
-Advanced query request (Qdrant universal query API).
+Advanced query request (Qdrant universal query API). Replaces the deprecated
+`search_points`, `recommend_points`, and `discover_points` endpoints.
 
 # Examples
 ```julia
+# Nearest-neighbor search
 QueryRequest(query=Float32[1,0,0,0], limit=5)
+
+# With named vector
 QueryRequest(query=Float32[1,0,0,0], limit=10, using_="image", with_payload=true)
+
+# Recommendation via query API
+QueryRequest(query=Dict("recommend" => Dict("positive" => [1], "negative" => [3])), limit=5)
+
+# Prefetch + re-rank
+QueryRequest(query=Float32[1,0,0,0], limit=5,
+    prefetch=[Dict("query" => Float32[1,0,0,0], "limit" => 50)])
 ```
 """
 StructUtils.@kwarg struct QueryRequest <: AbstractRequest
@@ -586,30 +553,240 @@ StructUtils.@kwarg struct QueryRequest <: AbstractRequest
     prefetch::Optional{Union{Dict{String,Any}, Vector{Any}}} = nothing
     params::Optional{SearchParams} = nothing
     lookup_from::Optional{LookupLocation} = nothing
+    group_by::Optional{String} = nothing
+    group_size::Optional{Int} = nothing
+end
+
+# ============================================================================
+# Response Types — type-stable returns from API calls
+# ============================================================================
+
+"""
+    UpdateResponse <: AbstractResponse
+
+Result of a mutating operation (upsert, delete, set_payload, etc.).
+
+# Fields
+- `operation_id::Int`: Server-assigned operation ID
+- `status::String`: Operation status (`"completed"` or `"acknowledged"`)
+"""
+struct UpdateResponse <: AbstractResponse
+    operation_id::Int
+    status::String
 end
 
 """
-    DiscoverRequest <: AbstractRequest
+    CountResponse <: AbstractResponse
 
-Discovery request — find points near a target with optional context.
+Result of `count_points`.
 
-# Examples
-```julia
-DiscoverRequest(target=Float32[1,0,0,0], limit=5,
-    context=[Dict("positive" => 1, "negative" => 3)])
-```
+# Fields
+- `count::Int`: Number of matching points
 """
-StructUtils.@kwarg struct DiscoverRequest <: AbstractRequest
-    target::Union{PointId, Vector{Float32}, Vector{Float64}}
-    limit::Int
-    context::Optional{Vector{Any}} = nothing
-    filter::Optional{Filter} = nothing
-    offset::Optional{Int} = nothing
-    with_payload::Optional{Union{Bool, Vector{String}}} = nothing
-    with_vector::Optional{Union{Bool, Vector{String}}} = nothing
-    params::Optional{SearchParams} = nothing
-    using_::Optional{String} = nothing &(name="using",)
-    lookup_from::Optional{LookupLocation} = nothing
+struct CountResponse <: AbstractResponse
+    count::Int
+end
+
+"""
+    ScoredPoint <: AbstractResponse
+
+A point returned from a search/query, with a similarity score.
+
+# Fields
+- `id::PointId`: Point identifier
+- `version::Int`: Point version
+- `score::Float64`: Similarity score
+- `payload::Optional{Dict{String,Any}}`: Payload data
+- `vector::Any`: Vector data (Float32[], Dict, etc.)
+"""
+struct ScoredPoint <: AbstractResponse
+    id::PointId
+    version::Int
+    score::Float64
+    payload::Optional{Dict{String,Any}}
+    vector::Any
+end
+
+"""
+    Record <: AbstractResponse
+
+A stored point record (from `get_points`, `scroll_points`).
+
+# Fields
+- `id::PointId`: Point identifier
+- `payload::Optional{Dict{String,Any}}`: Payload data
+- `vector::Any`: Vector data
+"""
+struct Record <: AbstractResponse
+    id::PointId
+    payload::Optional{Dict{String,Any}}
+    vector::Any
+end
+
+"""
+    ScrollResponse <: AbstractResponse
+
+Result of `scroll_points`.
+
+# Fields
+- `points::Vector{Record}`: Page of records
+- `next_page_offset::Optional{PointId}`: Offset for the next page (nothing if last page)
+"""
+struct ScrollResponse <: AbstractResponse
+    points::Vector{Record}
+    next_page_offset::Optional{PointId}
+end
+
+"""
+    QueryResponse <: AbstractResponse
+
+Result of `query_points`.
+
+# Fields
+- `points::Vector{ScoredPoint}`: Matching points with scores
+"""
+struct QueryResponse <: AbstractResponse
+    points::Vector{ScoredPoint}
+end
+
+"""
+    GroupResult <: AbstractResponse
+
+A single group within a grouped query result.
+
+# Fields
+- `id::Any`: Group key value
+- `hits::Vector{ScoredPoint}`: Points in this group
+"""
+struct GroupResult <: AbstractResponse
+    id::Any
+    hits::Vector{ScoredPoint}
+end
+
+"""
+    GroupsResponse <: AbstractResponse
+
+Result of `query_groups`.
+
+# Fields
+- `groups::Vector{GroupResult}`: Groups of matching points
+"""
+struct GroupsResponse <: AbstractResponse
+    groups::Vector{GroupResult}
+end
+
+"""
+    SnapshotInfo <: AbstractResponse
+
+Description of a snapshot.
+
+# Fields
+- `name::String`: Snapshot filename
+- `creation_time::Optional{String}`: ISO timestamp of creation
+- `size::Int`: Snapshot size in bytes
+- `checksum::Optional{String}`: Checksum if available
+"""
+struct SnapshotInfo <: AbstractResponse
+    name::String
+    creation_time::Optional{String}
+    size::Int
+    checksum::Optional{String}
+end
+
+"""
+    CollectionDescription <: AbstractResponse
+
+Brief collection info from `list_collections`.
+
+# Fields
+- `name::String`: Collection name
+"""
+struct CollectionDescription <: AbstractResponse
+    name::String
+end
+
+"""
+    AliasDescription <: AbstractResponse
+
+Alias mapping from `list_aliases`.
+
+# Fields
+- `alias_name::String`
+- `collection_name::String`
+"""
+struct AliasDescription <: AbstractResponse
+    alias_name::String
+    collection_name::String
+end
+
+"""
+    HealthResponse <: AbstractResponse
+
+Health check result.
+
+# Fields
+- `title::String`: Service title
+- `version::String`: Server version
+"""
+struct HealthResponse <: AbstractResponse
+    title::String
+    version::String
+end
+
+"""
+    FacetHit <: AbstractResponse
+
+A single facet count.
+
+# Fields
+- `value::Any`: The facet value
+- `count::Int`: Number of points with this value
+"""
+struct FacetHit <: AbstractResponse
+    value::Any
+    count::Int
+end
+
+"""
+    FacetResponse <: AbstractResponse
+
+Result of `facet`.
+
+# Fields
+- `hits::Vector{FacetHit}`: Facet value counts
+"""
+struct FacetResponse <: AbstractResponse
+    hits::Vector{FacetHit}
+end
+
+"""
+    SearchMatrixPairsResponse <: AbstractResponse
+
+Distance matrix in pair format.
+
+# Fields
+- `pairs::Vector{Dict{String,Any}}`: Distance pairs
+"""
+struct SearchMatrixPairsResponse <: AbstractResponse
+    pairs::Vector{Dict{String,Any}}
+end
+
+"""
+    SearchMatrixOffsetsResponse <: AbstractResponse
+
+Distance matrix in offset format.
+
+# Fields
+- `offsets_row::Vector{Int}`: Row offsets
+- `offsets_col::Vector{Int}`: Column offsets
+- `scores::Vector{Float64}`: Distance scores
+- `ids::Vector{PointId}`: Point IDs
+"""
+struct SearchMatrixOffsetsResponse <: AbstractResponse
+    offsets_row::Vector{Int}
+    offsets_col::Vector{Int}
+    scores::Vector{Float64}
+    ids::Vector{PointId}
 end
 
 # ============================================================================

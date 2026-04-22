@@ -3,9 +3,11 @@
 # ============================================================================
 
 """
-    cluster_status(client)
+    cluster_status(client) -> Dict{String,Any}
 
 Get cluster status information.
 """
-cluster_status(c::QdrantConnection) = execute(HTTP.get, c, "/cluster")
-cluster_status() = cluster_status(get_client())
+function cluster_status(c::QdrantConnection=get_client())
+    resp = request(HTTP.get, c, "/cluster")
+    parse_response(resp)
+end

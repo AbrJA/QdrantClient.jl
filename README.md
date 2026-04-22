@@ -10,13 +10,43 @@ A high-performance, idiomatic Julia client for the [Qdrant](https://qdrant.tech/
 
 ## Features
 
-- **Full API Coverage** — Collections, Points, Search, Recommendations, Discovery, Snapshots, Cluster, Service
-- **Typed Structs** — `StructUtils.jl`-based type system with zero-cost JSON mapping and `omit_null` serialization
+- **Full API Coverage** — Collections, Points, Query (universal), Snapshots, Cluster, Service
+- **Dual Transport** — HTTP/REST (default) and gRPC (~2-10× faster for bulk operations)
+- **Typed Responses** — Every endpoint returns a concrete Julia type (`UpdateResponse`, `QueryResponse`, `ScrollResponse`, etc.) for type-stable downstream code
 - **Multiple Dispatch** — Every endpoint accepts an explicit `QdrantConnection` or falls back to a global default
 - **Connection Pooling** — `HTTP.jl` pool reused across requests for high throughput
 - **Typed Errors** — All HTTP failures wrapped in `QdrantError` with status code and parsed detail
 - **Flexible Point IDs** — `PointId = Union{Int, UUID}` accepted everywhere
-- **Batch-First Design** — Batch variants (`search_batch`, `query_batch`, …) for all latency-sensitive paths
+- **Batch-First Design** — Batch variants (`query_batch`, `batch_points`, …) for all latency-sensitive paths
+
+---
+
+## What's New in v1.0
+
+### Breaking Changes
+
+- **Typed responses everywhere** — Functions now return typed structs instead of raw `Dict`:
+  - `upsert_points` → `UpdateResponse(operation_id, status)`
+  - `query_points` → `QueryResponse(points::Vector{ScoredPoint})`
+  - `scroll_points` → `ScrollResponse(points::Vector{Record}, next_page_offset)`
+  - `count_points` → `CountResponse(count)`
+  - `create_snapshot` → `SnapshotInfo(name, creation_time, size, checksum)`
+  - `health_check` → `HealthResponse(title, version)`
+
+- **Removed deprecated endpoints** — The following functions have been removed in favor of the universal `query_points` API:
+  - `search_points` / `search_batch` / `search_groups`
+  - `recommend_points` / `recommend_batch` / `recommend_groups`
+  - `discover_points` / `discover_batch`
+  - `SearchRequest`, `RecommendRequest`, `DiscoverRequest` types
+
+- **Removed `execute()` internal** — All HTTP calls now use direct `HTTP.request`.
+
+### New Features
+
+- **gRPC transport** via `GRPCTransport` — binary protocol for high-throughput workloads
+- **`query_groups`** — grouped query endpoint
+- **`facet`** — faceted search on payload fields
+- **`search_matrix_pairs` / `search_matrix_offsets`** — distance matrix endpoints
 
 ---
 
@@ -35,41 +65,36 @@ Requires Julia 1.12+.
 ```julia
 using QdrantClient
 
-# ── Connection ──────────────────────────────────────────────────────────────
+# ── Connection (HTTP, default) ──────────────────────────────────────────
 client = QdrantConnection()                                  # localhost:6333
 client = QdrantConnection(host="qdrant.example.com",
                           port=6333, api_key="secret")       # remote + auth
-set_client!(client)                                          # set global default
 
-# ── Collections ─────────────────────────────────────────────────────────────
+# ── Connection (gRPC, ~2-10× faster) ────────────────────────────────────
+client = QdrantConnection(GRPCTransport(host="localhost", port=6334))
+
+# ── Collections ─────────────────────────────────────────────────────────
 create_collection(client, "demo",
     CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
+# => true
 
-# ── Points ───────────────────────────────────────────────────────────────────
-upsert_points(client, "demo", [
+# ── Points ───────────────────────────────────────────────────────────────
+resp = upsert_points(client, "demo", [
     Point(id=1, vector=Float32[1, 0, 0, 0], payload=Dict("color" => "red")),
     Point(id=2, vector=Float32[0, 1, 0, 0], payload=Dict("color" => "blue")),
-    Point(id=3, vector=Float32[0, 0, 1, 0], payload=Dict("color" => "green")),
 ]; wait=true)
+# => UpdateResponse(operation_id=0, status="completed")
 
-# ── Search ───────────────────────────────────────────────────────────────────
-hits = search_points(client, "demo",
-    SearchRequest(vector=Float32[1, 0, 0, 0], limit=2, with_payload=true))
-# => [Dict("id"=>1, "score"=>1.0, "payload"=>…), …]
+# ── Query (universal API) ────────────────────────────────────────────────
+results = query_points(client, "demo"; query=Float32[1, 0, 0, 0], limit=2, with_payload=true)
+# => QueryResponse with results.points::Vector{ScoredPoint}
 
-# ── Query (universal API) ────────────────────────────────────────────────────
-results = query_points(client, "demo",
-    QueryRequest(query=Float32[1, 0, 0, 0], limit=2))
-
-# ── Recommendations ──────────────────────────────────────────────────────────
-recs = recommend_points(client, "demo",
-    RecommendRequest(positive=[1], negative=[3], limit=2))
-
-# ── Scroll ───────────────────────────────────────────────────────────────────
+# ── Scroll ───────────────────────────────────────────────────────────────
 page = scroll_points(client, "demo"; limit=100, with_payload=true)
+# => ScrollResponse(points::Vector{Record}, next_page_offset)
 
-# ── Cleanup ──────────────────────────────────────────────────────────────────
-delete_collection(client, "demo")
+# ── Cleanup ──────────────────────────────────────────────────────────────
+delete_collection(client, "demo")  # => true
 ```
 
 ---
@@ -88,10 +113,37 @@ client = QdrantConnection(host="cloud.qdrant.io", port=6333,
 # Custom timeout (seconds)
 client = QdrantConnection(host="localhost", port=6333, timeout=60)
 
+# gRPC transport
+client = QdrantConnection(GRPCTransport(host="localhost", port=6334))
+
 # Global default — omit the client argument anywhere
 set_client!(client)
-get_client()           # retrieve current global
+get_client()
 ```
+
+---
+
+## gRPC Transport
+
+gRPC uses Protocol Buffers for binary serialization, offering significantly better performance for bulk operations (upserts, queries, scrolls).
+
+```julia
+# Create a gRPC connection
+grpc = QdrantConnection(GRPCTransport(host="localhost", port=6334))
+
+# All API functions work identically — transport is selected automatically
+create_collection(grpc, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
+upsert_points(grpc, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
+query_points(grpc, "demo"; query=Float32[1,0,0,0], limit=5)
+```
+
+### gRPC Limitations
+
+Due to Proto3 wire format constraints, the following limitations apply:
+
+- **`create_payload_index` with `"keyword"` type** — Proto3 does not send the default enum value (`FieldType.FieldTypeKeyword = 0`) over the wire, so creating a keyword index silently creates an integer index instead. **Workaround:** Use the HTTP transport for `create_payload_index` with keyword fields, or create keyword indexes before switching to gRPC.
+- **`get_point` (single point)** — Not available over gRPC; use `get_points(client, collection, [id])` instead.
+- **Snapshot download** — gRPC snapshot operations create/list/delete snapshots but do not support downloading snapshot files.
 
 ---
 
@@ -131,22 +183,23 @@ create_collection(client, "tuned", CollectionConfig(
 ### Collection Operations
 
 ```julia
-list_collections(client)                         # → Dict with "collections" key
-get_collection(client, "images")                 # → full collection info
-collection_exists(client, "images")              # → Dict with "exists" key
+list_collections(client)              # => Vector{CollectionDescription}
+get_collection(client, "images")      # => Dict{String,Any} (full info)
+collection_exists(client, "images")   # => true/false
 update_collection(client, "images",
     CollectionUpdate(optimizers_config=OptimizersConfig(indexing_threshold=50_000)))
-delete_collection(client, "images")              # → true
+                                      # => true
+delete_collection(client, "images")   # => true
 ```
 
 ### Aliases
 
 ```julia
-list_aliases(client)                                    # all aliases
-list_collection_aliases(client, "images")               # aliases for one collection
-create_alias(client, "images_v2", "images")             # create alias
-rename_alias(client, "images_v2", "images_v3")          # rename
-delete_alias(client, "images_v3")                       # delete
+list_aliases(client)                                    # => Vector{AliasDescription}
+list_collection_aliases(client, "images")               # => Vector{AliasDescription}
+create_alias(client, "images_v2", "images")             # => true
+rename_alias(client, "images_v2", "images_v3")          # => true
+delete_alias(client, "images_v3")                       # => true
 ```
 
 ---
@@ -156,231 +209,122 @@ delete_alias(client, "images_v3")                       # delete
 ### Upsert
 
 ```julia
-# Integer IDs
-upsert_points(client, "demo", [
+# Integer IDs — returns UpdateResponse
+resp = upsert_points(client, "demo", [
     Point(id=1, vector=Float32[1, 0, 0, 0]),
     Point(id=2, vector=Float32[0, 1, 0, 0], payload=Dict("label" => "cat")),
 ]; wait=true)
+resp.status  # "completed"
 
 # UUID IDs
 using UUIDs
 upsert_points(client, "demo", [
     Point(id=uuid4(), vector=Float32[1, 0, 0, 0]),
 ])
-
-# Named vectors (multi-vector collection)
-upsert_points(client, "multimodal", [
-    Point(id=1, vector=Dict{String,Vector{Float32}}(
-        "image" => rand(Float32, 512),
-        "text"  => rand(Float32, 768),
-    )),
-])
 ```
 
 ### Retrieve
 
 ```julia
-get_points(client, "demo", [1, 2, 3]; with_payload=true)
-get_points(client, "demo", 1)                    # single point
+records = get_points(client, "demo", [1, 2, 3]; with_payload=true)
+# => Vector{Record}  — each Record has .id, .payload, .vector
+
+record = get_point(client, "demo", 1)  # => Record (HTTP only)
 ```
 
 ### Delete
 
 ```julia
-delete_points(client, "demo", [1, 2])            # by ID list
-delete_points(client, "demo", 1)                 # single ID
-delete_points(client, "demo",                    # by filter
+delete_points(client, "demo", [1, 2])   # => UpdateResponse
+delete_points(client, "demo", 1)        # single ID
+delete_points(client, "demo",           # by filter
     Filter(must=[FieldCondition(key="label", match=MatchValue(value="cat"))]))
 ```
 
 ### Payload
 
 ```julia
-# Set payload fields
 set_payload(client, "demo", Dict("verified" => true), [1, 2])
-
-# Set payload via filter
-set_payload(client, "demo", Dict("archived" => true),
-    Filter(must=[FieldCondition(key="label", match=MatchValue(value="cat"))]))
-
-# Delete specific keys
+overwrite_payload(client, "demo", Dict("verified" => true), [1])
 delete_payload(client, "demo", ["verified"], [1])
-
-# Remove all payload
 clear_payload(client, "demo", [1, 2])
+# All return UpdateResponse
 ```
 
 ### Vectors
 
 ```julia
-# Update vectors for existing points
 update_vectors(client, "demo", [
     Point(id=1, vector=Float32[0.9, 0.1, 0, 0]),
-])
+])  # => UpdateResponse
 
-# Delete a named vector field
-delete_vectors(client, "multimodal", ["text"], [1, 2])
+delete_vectors(client, "multimodal", ["text"], [1, 2])  # => UpdateResponse
 ```
 
 ### Scroll & Count
 
 ```julia
-# Scroll without filter
 page = scroll_points(client, "demo"; limit=100, with_payload=true)
-page["points"]     # vector of point dicts
-page["next_page_offset"]
+# => ScrollResponse
+page.points             # Vector{Record}
+page.next_page_offset   # nothing or next offset
 
-# Scroll with filter
-page = scroll_points(client, "demo";
-    filter=Filter(must=[FieldCondition(key="label", match=MatchValue(value="cat"))]),
-    limit=50)
+# Count
+c = count_points(client, "demo"; exact=true)
+# => CountResponse
+c.count  # 42
 
-# Count all points
-count_points(client, "demo")                     # approximate
-count_points(client, "demo"; exact=true)         # exact (slower)
-
-# Count with filter
+# With filter
 count_points(client, "demo";
     filter=Filter(must=[FieldCondition(key="label", match=MatchValue(value="cat"))]))
 ```
 
 ### Payload Index
 
-Indexes speed up filtered searches on payload fields.
-
 ```julia
-# Simple type index
 create_payload_index(client, "demo", "label"; field_schema="keyword")
-create_payload_index(client, "demo", "price"; field_schema="float")
-create_payload_index(client, "demo", "count"; field_schema="integer")
+# => UpdateResponse
 
-# Full-text index
 create_payload_index(client, "demo", "description";
     field_schema=TextIndexParams(tokenizer="word", lowercase=true))
 
 delete_payload_index(client, "demo", "label")
+# => UpdateResponse
 ```
 
 ### Batch Operations
 
 ```julia
-batch_points(client, "demo", [
+results = batch_points(client, "demo", [
     Dict("upsert" => Dict("points" => [
         Dict("id" => 10, "vector" => Float32[1,0,0,0]),
     ])),
     Dict("delete" => Dict("points" => [5, 6])),
 ])
-```
-
----
-
-## Search
-
-### Basic Search
-
-```julia
-# Struct form
-hits = search_points(client, "demo",
-    SearchRequest(vector=Float32[1, 0, 0, 0], limit=5, with_payload=true))
-
-# Keyword shorthand
-hits = search_points(client, "demo";
-    vector=Float32[1, 0, 0, 0], limit=5, with_payload=true)
-
-# Named vector
-hits = search_points(client, "multimodal",
-    SearchRequest(
-        vector=NamedVector(name="image", vector=rand(Float32, 512)),
-        limit=5))
-
-# Filtered search
-hits = search_points(client, "demo",
-    SearchRequest(
-        vector=Float32[1, 0, 0, 0],
-        limit=5,
-        filter=Filter(must=[
-            FieldCondition(key="label", match=MatchValue(value="cat"))
-        ])))
-
-# With HNSW tuning
-hits = search_points(client, "demo",
-    SearchRequest(
-        vector=Float32[1, 0, 0, 0],
-        limit=5,
-        params=SearchParams(hnsw_ef=128, exact=false)))
-```
-
-### Batch Search
-
-```julia
-batch = search_batch(client, "demo", [
-    SearchRequest(vector=Float32[1, 0, 0, 0], limit=3),
-    SearchRequest(vector=Float32[0, 1, 0, 0], limit=3),
-])
-# => [hits1, hits2]
-```
-
-### Grouped Search
-
-```julia
-search_groups(client, "demo", Dict(
-    "vector" => Float32[1, 0, 0, 0],
-    "limit"  => 10,
-    "group_by" => "label",
-); group_size=2)
-```
-
----
-
-## Recommendations
-
-```julia
-# Positive examples only
-recs = recommend_points(client, "demo",
-    RecommendRequest(positive=[1, 2], limit=5))
-
-# Positive + negative examples
-recs = recommend_points(client, "demo",
-    RecommendRequest(positive=[1, 2], negative=[3], limit=5, with_payload=true))
-
-# Named vector namespace
-recs = recommend_points(client, "multimodal",
-    RecommendRequest(positive=[1], limit=5, using_="image"))
-
-# Lookup vectors from a different collection
-recs = recommend_points(client, "demo",
-    RecommendRequest(
-        positive=[1],
-        limit=5,
-        lookup_from=LookupLocation(collection="other_col", vector="image")))
-
-# Batch
-batch = recommend_batch(client, "demo", [
-    RecommendRequest(positive=[1], limit=3),
-    RecommendRequest(positive=[2], limit=3),
-])
+# => Vector{UpdateResponse}
 ```
 
 ---
 
 ## Query (Universal API)
 
-The `query_points` API is the most flexible endpoint, supporting nearest-neighbor,
-recommendations, and re-ranking in one call.
+The `query_points` API is the single endpoint for nearest-neighbor search,
+recommendations, discovery, and re-ranking. It replaces the deprecated
+`search_points`, `recommend_points`, and `discover_points`.
 
 ```julia
-# Nearest-neighbor by vector
-query_points(client, "demo",
+# Nearest-neighbor search
+results = query_points(client, "demo",
     QueryRequest(query=Float32[1, 0, 0, 0], limit=5))
+# => QueryResponse
+results.points  # Vector{ScoredPoint} — each has .id, .version, .score, .payload, .vector
 
-# Recommend by point ID
+# With kwargs
+query_points(client, "demo"; query=Float32[1, 0, 0, 0], limit=5, with_payload=true)
+
+# Recommendation via query API
 query_points(client, "demo",
-    QueryRequest(query=Dict("recommend" => Dict("positive" => [1], "negative" => [3])),
-                 limit=5))
-
-# Re-rank with named vector
-query_points(client, "multimodal",
-    QueryRequest(query=rand(Float32, 512), limit=5, using_="image"))
+    QueryRequest(query=Dict("recommend" => Dict("positive" => [1])), limit=5))
 
 # Prefetch + re-rank (two-stage retrieval)
 query_points(client, "demo",
@@ -394,26 +338,22 @@ query_batch(client, "demo", [
     QueryRequest(query=Float32[1, 0, 0, 0], limit=3),
     QueryRequest(query=Float32[0, 1, 0, 0], limit=3),
 ])
+# => Vector{QueryResponse}
+
+# Grouped query
+query_groups(client, "demo"; query=Float32[1, 0, 0, 0], group_by="label",
+    limit=10, group_size=2)
+# => GroupsResponse
 ```
 
 ---
 
-## Discovery
-
-Discovery finds points near a target while respecting a context of positive/negative pairs.
+## Faceted Search
 
 ```julia
-discover_points(client, "demo",
-    DiscoverRequest(
-        target=Float32[1, 0, 0, 0],
-        limit=5,
-        context=[Dict("positive" => 1, "negative" => 3)]))
-
-# Batch
-discover_batch(client, "demo", [
-    DiscoverRequest(target=Float32[1, 0, 0, 0], limit=3,
-                    context=[Dict("positive" => 1, "negative" => 2)]),
-])
+result = facet(client, "demo"; key="color", limit=10)
+# => FacetResponse
+result.hits  # Vector{FacetHit} — each has .value, .count
 ```
 
 ---
@@ -421,7 +361,7 @@ discover_batch(client, "demo", [
 ## Filters
 
 Filters can be used in `delete_points`, `set_payload`, `scroll_points`, `count_points`,
-`search_points`, `query_points`, `recommend_points`, and `discover_points`.
+and `query_points`.
 
 ```julia
 # Exact keyword match
@@ -457,11 +397,18 @@ Filter(must_not=[FieldCondition(key="archived", match=MatchValue(value=true))])
 
 ```julia
 snap = create_snapshot(client, "demo")
-snap["name"]                                     # snapshot file name
+# => SnapshotInfo
+snap.name              # snapshot file name
+snap.creation_time
+snap.size
 
-snaps = list_snapshots(client, "demo")
+snaps = list_snapshots(client, "demo")   # => Vector{SnapshotInfo}
+delete_snapshot(client, "demo", snap.name)  # => true
 
-delete_snapshot(client, "demo", snap["name"])
+# Full storage snapshots
+create_full_snapshot(client)             # => SnapshotInfo
+list_full_snapshots(client)              # => Vector{SnapshotInfo}
+delete_full_snapshot(client, snap.name)  # => true
 ```
 
 ---
@@ -469,31 +416,46 @@ delete_snapshot(client, "demo", snap["name"])
 ## Cluster & Service
 
 ```julia
-# Health check
 health = health_check(client)
-health["status"]                                 # "healthy" or "unhealthy"
+# => HealthResponse
+health.title    # "qdrant - vectorass database"
+health.version  # "1.x.y"
 
-# Prometheus-format metrics
-metrics = get_metrics(client)
-
-# Telemetry
-telemetry = get_telemetry(client)
-
-# Cluster / distributed
-cs = cluster_status(client)
+get_version(client)          # => HealthResponse
+metrics = get_metrics(client)  # => String (Prometheus format)
+telemetry = get_telemetry(client)  # => Dict{String,Any}
+cluster_status(client)       # => Dict{String,Any}
 ```
 
 ---
 
-## Type Reference
+## Response Type Reference
+
+| Type | Fields | Returned By |
+|------|--------|-------------|
+| `UpdateResponse` | `operation_id::Int`, `status::String` | `upsert_points`, `delete_points`, `set_payload`, `clear_payload`, `create_payload_index`, etc. |
+| `QueryResponse` | `points::Vector{ScoredPoint}` | `query_points`, `query_batch` |
+| `ScoredPoint` | `id::PointId`, `version::Int`, `score::Float64`, `payload`, `vector` | (nested in QueryResponse) |
+| `ScrollResponse` | `points::Vector{Record}`, `next_page_offset` | `scroll_points` |
+| `Record` | `id::PointId`, `payload`, `vector` | `get_points`, `get_point`, (nested in ScrollResponse) |
+| `CountResponse` | `count::Int` | `count_points` |
+| `GroupsResponse` | `groups::Vector{GroupResult}` | `query_groups` |
+| `GroupResult` | `id`, `hits::Vector{ScoredPoint}` | (nested in GroupsResponse) |
+| `SnapshotInfo` | `name`, `creation_time`, `size`, `checksum` | `create_snapshot`, `list_snapshots` |
+| `CollectionDescription` | `name::String` | `list_collections` |
+| `AliasDescription` | `alias_name::String`, `collection_name::String` | `list_aliases` |
+| `HealthResponse` | `title::String`, `version::String` | `health_check`, `get_version` |
+| `FacetResponse` | `hits::Vector{FacetHit}` | `facet` |
+| `FacetHit` | `value`, `count::Int` | (nested in FacetResponse) |
 
 ### Core Types
 
 | Type | Purpose |
 |------|---------|
-| `QdrantConnection` | Client connection (host, port, api_key, tls, timeout) |
+| `QdrantConnection` | Client connection (HTTP or gRPC transport) |
 | `QdrantError` | Typed error with `status`, `message`, `detail` |
 | `PointId` | `Union{Int, UUID}` |
+| `GRPCTransport` | gRPC transport configuration |
 
 ### Collection Types
 
@@ -501,7 +463,6 @@ cs = cluster_status(client)
 |------|---------|
 | `CollectionConfig` | Full collection creation config |
 | `CollectionUpdate` | Patch payload for `update_collection` |
-| `CollectionParamsDiff` | Mutable replication/consistency params |
 | `VectorParams` | Dense vector field config (size, distance, HNSW, quantization) |
 | `SparseVectorParams` | Sparse vector field config |
 | `HnswConfig` | HNSW index tuning |
@@ -513,20 +474,8 @@ cs = cluster_status(client)
 | Type | Purpose |
 |------|---------|
 | `ScalarQuantization` | Scalar (int8) quantization wrapper |
-| `ScalarQuantizationConfig` | Scalar quantization parameters |
 | `ProductQuantization` | PQ quantization wrapper |
-| `ProductQuantizationConfig` | PQ compression parameters |
 | `BinaryQuantization` | Binary quantization wrapper |
-| `BinaryQuantizationConfig` | Binary quantization parameters |
-| `QuantizationSearchParams` | Per-query quantization overrides |
-
-### Point Types
-
-| Type | Purpose |
-|------|---------|
-| `Point` | Point with `id`, `vector`, optional `payload` |
-| `NamedVector` | `(name, vector)` for multi-vector points |
-| `LookupLocation` | Cross-collection vector lookup |
 
 ### Filter Types
 
@@ -537,20 +486,8 @@ cs = cluster_status(client)
 | `MatchValue` | Exact value match |
 | `MatchAny` | Match any of a list |
 | `MatchText` | Full-text match |
-| `RangeCondition` | Numeric range (`gte`, `gt`, `lte`, `lt`) |
+| `RangeCondition` | Numeric range |
 | `HasIdCondition` | Filter by point IDs |
-| `IsEmptyCondition` | Match empty fields |
-| `IsNullCondition` | Match null fields |
-
-### Request Types
-
-| Type | Purpose |
-|------|---------|
-| `SearchRequest` | Nearest-neighbor search |
-| `RecommendRequest` | Recommendation from examples |
-| `QueryRequest` | Universal query (NN + recommend + rerank) |
-| `DiscoverRequest` | Discovery with context pairs |
-| `SearchParams` | Search-time HNSW / quantization overrides |
 
 ### Distance Values
 
@@ -563,12 +500,24 @@ Manhattan  # L1 distance
 
 ---
 
+## Migration from v0.x
+
+| v0.x | v1.0 |
+|------|------|
+| `search_points(c, col, SearchRequest(...))` | `query_points(c, col, QueryRequest(query=..., limit=...))` |
+| `recommend_points(c, col, RecommendRequest(...))` | `query_points(c, col, QueryRequest(query=Dict("recommend" => ...), limit=...))` |
+| `discover_points(c, col, DiscoverRequest(...))` | `query_points(c, col, QueryRequest(query=Dict("discover" => ...), limit=...))` |
+| `result["points"]` (Dict access) | `result.points` (typed struct field) |
+| `result["status"]` | `result.status` |
+
+---
+
 ## Error Handling
 
 ```julia
 try
-    search_points(client, "missing_collection",
-        SearchRequest(vector=Float32[1,0,0,0], limit=5))
+    query_points(client, "missing_collection";
+        query=Float32[1,0,0,0], limit=5)
 catch err
     if err isa QdrantError
         println("HTTP $(err.status): $(err.message)")
@@ -587,9 +536,9 @@ a global default is used:
 ```julia
 set_client!(QdrantConnection(host="prod-qdrant", port=6333, api_key="key"))
 
-# These are now equivalent:
-search_points(get_client(), "demo", SearchRequest(vector=q, limit=5))
-search_points("demo", SearchRequest(vector=q, limit=5))
+# These are equivalent:
+query_points(get_client(), "demo"; query=q, limit=5)
+query_points("demo"; query=q, limit=5)
 ```
 
 ---
@@ -597,17 +546,11 @@ search_points("demo", SearchRequest(vector=q, limit=5))
 ## Development
 
 ```bash
-# Start a local Qdrant instance
+# Start a local Qdrant instance (HTTP + gRPC)
 docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
 # Run tests
-julia --project=. test/runtests.jl
-
-# Format code
-julia --project=. -e 'using JuliaFormatter; format(".")'
-
-# Quality check
-julia --project=. -e 'using Aqua; Aqua.test_all(QdrantClient)'
+julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
 ---

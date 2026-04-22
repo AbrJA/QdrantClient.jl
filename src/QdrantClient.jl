@@ -35,7 +35,7 @@ using StructUtils
 using UUIDs
 using ProtoBuf: OneOf
 
-const CLIENT_VERSION = "0.3.0"
+const CLIENT_VERSION = "1.0.0"
 
 # ── Error type ───────────────────────────────────────────────────────────
 include("error.jl")
@@ -216,6 +216,7 @@ end
     parse_response(resp::HTTP.Response)
 
 Parse the JSON response, unwrapping Qdrant's `{status, time, result}` envelope.
+Returns the raw `result` value (or entire body if no envelope).
 """
 function parse_response(resp::HTTP.Response)
     b = String(resp.body)
@@ -224,13 +225,181 @@ function parse_response(resp::HTTP.Response)
     haskey(parsed, "result") ? parsed["result"] : parsed
 end
 
-"""
-    execute(method, client, path, [body]; query=nothing)
+# ── Typed Response Constructors ──────────────────────────────────────────
 
-Combined request + parse_response in one call.
 """
-function execute(method::Function, conn::QdrantConnection, path::AbstractString, body=nothing; query=nothing)
-    parse_response(request(method, conn, path, body; query))
+    parse_update(resp::HTTP.Response) -> UpdateResponse
+
+Parse an update/mutation response into a typed `UpdateResponse`.
+"""
+function parse_update(resp::HTTP.Response)
+    r = parse_response(resp)
+    r === true && return UpdateResponse(0, "completed")
+    r isa AbstractDict || return UpdateResponse(0, "completed")
+    UpdateResponse(
+        get(r, "operation_id", 0)::Union{Int,Int64},
+        get(r, "status", "completed")::String,
+    )
+end
+
+"""
+    parse_bool(resp::HTTP.Response) -> Bool
+
+Parse a boolean result.
+"""
+function parse_bool(resp::HTTP.Response)
+    r = parse_response(resp)
+    r === true
+end
+
+"""
+    parse_records(resp::HTTP.Response) -> Vector{Record}
+
+Parse an array of point records.
+"""
+function parse_records(resp::HTTP.Response)
+    r = parse_response(resp)
+    r isa AbstractVector || return Record[]
+    Record[_dict_to_record(p) for p in r]
+end
+
+function _dict_to_record(d::AbstractDict)
+    id = d["id"]
+    pid = id isa Integer ? Int(id) : UUID(string(id))
+    Record(
+        pid,
+        get(d, "payload", nothing),
+        get(d, "vector", nothing),
+    )
+end
+
+"""
+    parse_scored_points(resp::HTTP.Response) -> Vector{ScoredPoint}
+
+Parse an array of scored points (from deprecated search or query results).
+"""
+function parse_scored_points(raw)
+    raw isa AbstractVector || return ScoredPoint[]
+    ScoredPoint[_dict_to_scored(p) for p in raw]
+end
+
+function _dict_to_scored(d::AbstractDict)
+    id = d["id"]
+    pid = id isa Integer ? Int(id) : UUID(string(id))
+    ScoredPoint(
+        pid,
+        get(d, "version", 0)::Union{Int,Int64},
+        Float64(get(d, "score", 0.0)),
+        get(d, "payload", nothing),
+        get(d, "vector", nothing),
+    )
+end
+
+function _dict_to_point_id(v)
+    v isa Integer ? Int(v) : UUID(string(v))
+end
+
+"""
+    parse_query(resp::HTTP.Response) -> QueryResponse
+
+Parse a query_points response.
+"""
+function parse_query(resp::HTTP.Response)
+    r = parse_response(resp)
+    if r isa AbstractDict && haskey(r, "points")
+        QueryResponse(parse_scored_points(r["points"]))
+    elseif r isa AbstractVector
+        QueryResponse(parse_scored_points(r))
+    else
+        QueryResponse(ScoredPoint[])
+    end
+end
+
+"""
+    parse_scroll(resp::HTTP.Response) -> ScrollResponse
+
+Parse a scroll_points response.
+"""
+function parse_scroll(resp::HTTP.Response)
+    r = parse_response(resp)
+    r isa AbstractDict || return ScrollResponse(Record[], nothing)
+    points = haskey(r, "points") ? Record[_dict_to_record(p) for p in r["points"]] : Record[]
+    offset_raw = get(r, "next_page_offset", nothing)
+    offset = offset_raw === nothing ? nothing : _dict_to_point_id(offset_raw)
+    ScrollResponse(points, offset)
+end
+
+"""
+    parse_count(resp::HTTP.Response) -> CountResponse
+
+Parse a count_points response.
+"""
+function parse_count(resp::HTTP.Response)
+    r = parse_response(resp)
+    r isa AbstractDict || return CountResponse(0)
+    CountResponse(Int(get(r, "count", 0)))
+end
+
+"""
+    parse_groups(resp::HTTP.Response) -> GroupsResponse
+
+Parse a query_groups response.
+"""
+function parse_groups(resp::HTTP.Response)
+    r = parse_response(resp)
+    r isa AbstractDict || return GroupsResponse(GroupResult[])
+    raw_groups = get(r, "groups", Any[])
+    groups = GroupResult[]
+    for g in raw_groups
+        gid = get(g, "id", nothing)
+        hits = parse_scored_points(get(g, "hits", Any[]))
+        push!(groups, GroupResult(gid, hits))
+    end
+    GroupsResponse(groups)
+end
+
+"""
+    parse_snapshot(resp::HTTP.Response) -> SnapshotInfo
+
+Parse a create/get snapshot response.
+"""
+function parse_snapshot(resp::HTTP.Response)
+    r = parse_response(resp)
+    r isa AbstractDict || return SnapshotInfo("", nothing, 0, nothing)
+    SnapshotInfo(
+        get(r, "name", "")::String,
+        get(r, "creation_time", nothing),
+        Int(get(r, "size", 0)),
+        get(r, "checksum", nothing),
+    )
+end
+
+"""
+    parse_snapshot_list(resp::HTTP.Response) -> Vector{SnapshotInfo}
+
+Parse a list_snapshots response.
+"""
+function parse_snapshot_list(resp::HTTP.Response)
+    r = parse_response(resp)
+    r isa AbstractVector || return SnapshotInfo[]
+    SnapshotInfo[SnapshotInfo(
+        get(s, "name", "")::String,
+        get(s, "creation_time", nothing),
+        Int(get(s, "size", 0)),
+        get(s, "checksum", nothing),
+    ) for s in r]
+end
+
+"""
+    parse_facet(resp::HTTP.Response) -> FacetResponse
+
+Parse a facet response.
+"""
+function parse_facet(resp::HTTP.Response)
+    r = parse_response(resp)
+    r isa AbstractDict || return FacetResponse(FacetHit[])
+    raw_hits = get(r, "hits", Any[])
+    FacetResponse(FacetHit[FacetHit(get(h, "value", nothing), Int(get(h, "count", 0))) for h in raw_hits])
 end
 
 # ── gRPC transport type (needed before API files for dispatch) ────────────
@@ -246,8 +415,7 @@ is_grpc(c::QdrantConnection) = c.transport isa GRPCTransport
 # ── API modules (HTTP/REST + gRPC internal dispatch) ─────────────────────
 include("collections.jl")
 include("points.jl")
-include("search.jl")
-include("discovery.jl")
+include("query.jl")
 include("snapshots.jl")
 include("distributed.jl")
 include("service.jl")
@@ -255,8 +423,7 @@ include("service.jl")
 # ── gRPC API implementations ────────────────────────────────────────────
 include("grpc_collections.jl")
 include("grpc_points.jl")
-include("grpc_search.jl")
-include("grpc_discovery.jl")
+include("grpc_query.jl")
 include("grpc_snapshots.jl")
 include("grpc_service.jl")
 
@@ -275,7 +442,7 @@ export to_proto_point, from_proto_scored_point, from_proto_retrieved_point
 export julia_value_to_proto, proto_value_to_julia
 
 # Type hierarchy
-export AbstractQdrantType, AbstractConfig, AbstractRequest, AbstractCondition
+export AbstractQdrantType, AbstractConfig, AbstractRequest, AbstractCondition, AbstractResponse
 
 # Type alias
 export Optional
@@ -300,7 +467,14 @@ export Filter, FieldCondition, MatchValue, MatchAny, MatchText,
        RangeCondition, HasIdCondition, IsEmptyCondition, IsNullCondition
 
 # Request types
-export SearchRequest, RecommendRequest, QueryRequest, DiscoverRequest
+export QueryRequest
+
+# Response types
+export UpdateResponse, CountResponse, ScoredPoint, Record
+export ScrollResponse, QueryResponse, GroupResult, GroupsResponse
+export SnapshotInfo, CollectionDescription, AliasDescription
+export HealthResponse, FacetHit, FacetResponse
+export SearchMatrixPairsResponse, SearchMatrixOffsetsResponse
 
 # Payload index types
 export TextIndexParams
@@ -311,27 +485,31 @@ export serialize_body
 # Collections API
 export list_collections, create_collection, delete_collection,
        collection_exists, get_collection, update_collection,
+       get_collection_optimizations,
        list_aliases, create_alias, delete_alias, rename_alias,
        list_collection_aliases
 
 # Points API
-export upsert_points, delete_points, get_points, set_payload,
+export upsert_points, delete_points, get_points, get_point,
+       set_payload, overwrite_payload,
        delete_payload, clear_payload, update_vectors, delete_vectors,
        scroll_points, count_points, batch_points
 
-# Search API
-export search_points, search_batch, search_groups,
-       recommend_points, recommend_batch, recommend_groups,
-       query_points, query_batch, query_groups
+# Query API (modern unified)
+export query_points, query_batch, query_groups
 
-# Discovery API
-export discover_points, discover_batch
+# Search matrix API
+export search_matrix_pairs, search_matrix_offsets
+
+# Facet API
+export facet
 
 # Snapshots API
-export create_snapshot, list_snapshots, delete_snapshot
+export create_snapshot, list_snapshots, delete_snapshot,
+       create_full_snapshot, list_full_snapshots, delete_full_snapshot
 
 # Service API
-export health_check, get_metrics, get_telemetry
+export health_check, get_metrics, get_telemetry, get_version
 
 # Payload index API
 export create_payload_index, delete_payload_index

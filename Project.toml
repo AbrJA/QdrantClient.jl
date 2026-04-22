@@ -1,6 +1,6 @@
 name = "QdrantClient"
 uuid = "18f42571-9ca3-47e3-9e7d-7108c8924fb3"
-version = "0.3.0"
+version = "1.0.0"
 authors = ["AbrJA <abraham.jaimes.mx@gmail.com>"]
 
 [deps]

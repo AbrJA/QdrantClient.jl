@@ -41,7 +41,7 @@ end
 # Unit Tests
 # ═══════════════════════════════════════════════════════════════════════════
 
-@testset "QdrantClient.jl v0.3.0" begin
+@testset "QdrantClient.jl v1.0" begin
 
     # ── Type Hierarchy ──────────────────────────────────────────────────
     @testset "Type Hierarchy" begin
@@ -60,10 +60,7 @@ end
         @test ProductQuantization <: AbstractConfig
         @test BinaryQuantization <: AbstractConfig
 
-        @test SearchRequest <: AbstractRequest
-        @test RecommendRequest <: AbstractRequest
         @test QueryRequest <: AbstractRequest
-        @test DiscoverRequest <: AbstractRequest
 
         @test Filter <: AbstractCondition
         @test FieldCondition <: AbstractCondition
@@ -77,6 +74,22 @@ end
 
         @test Point <: AbstractQdrantType
         @test NamedVector <: AbstractQdrantType
+
+        # Response types
+        @test UpdateResponse <: AbstractResponse
+        @test CountResponse <: AbstractResponse
+        @test ScoredPoint <: AbstractResponse
+        @test Record <: AbstractResponse
+        @test ScrollResponse <: AbstractResponse
+        @test QueryResponse <: AbstractResponse
+        @test GroupResult <: AbstractResponse
+        @test GroupsResponse <: AbstractResponse
+        @test SnapshotInfo <: AbstractResponse
+        @test CollectionDescription <: AbstractResponse
+        @test AliasDescription <: AbstractResponse
+        @test HealthResponse <: AbstractResponse
+        @test FacetHit <: AbstractResponse
+        @test FacetResponse <: AbstractResponse
     end
 
     # ── Distance Enum ───────────────────────────────────────────────────
@@ -168,33 +181,6 @@ end
             @test length(parsed["vector"]) == 4
         end
 
-        @testset "SearchRequest" begin
-            sr = SearchRequest(vector=Float32[1.0, 0.0], limit=5, with_payload=true)
-            j = JSON.json(sr; omit_null=true)
-            parsed = JSON.parse(j)
-            @test parsed["limit"] == 5
-            @test parsed["with_payload"] === true
-            @test !haskey(parsed, "filter")
-            @test !haskey(parsed, "params")
-        end
-
-        @testset "SearchRequest with SearchParams" begin
-            sr = SearchRequest(vector=Float32[1.0], limit=5,
-                params=SearchParams(exact=true, hnsw_ef=128))
-            j = JSON.json(sr; omit_null=true)
-            parsed = JSON.parse(j)
-            @test parsed["params"]["exact"] === true
-            @test parsed["params"]["hnsw_ef"] == 128
-        end
-
-        @testset "RecommendRequest using_ → using tag" begin
-            rr = RecommendRequest(positive=Any[1, 2], limit=5, using_="dense")
-            j = JSON.json(rr; omit_null=true)
-            parsed = JSON.parse(j)
-            @test parsed["using"] == "dense"
-            @test !haskey(parsed, "using_")
-        end
-
         @testset "QueryRequest using_ → using tag" begin
             qr = QueryRequest(query=Float32[1.0, 0.0], limit=3, using_="image")
             j = JSON.json(qr; omit_null=true)
@@ -203,12 +189,13 @@ end
             @test !haskey(parsed, "using_")
         end
 
-        @testset "DiscoverRequest using_ → using tag" begin
-            dr = DiscoverRequest(target=Float32[1.0, 0.0], limit=3, using_="image")
-            j = JSON.json(dr; omit_null=true)
+        @testset "QueryRequest basic" begin
+            qr = QueryRequest(query=Float32[1.0, 0.0], limit=5, with_payload=true)
+            j = JSON.json(qr; omit_null=true)
             parsed = JSON.parse(j)
-            @test parsed["using"] == "image"
-            @test !haskey(parsed, "using_")
+            @test parsed["limit"] == 5
+            @test parsed["with_payload"] === true
+            @test !haskey(parsed, "filter")
         end
 
         @testset "Filter" begin
@@ -284,7 +271,6 @@ end
         @test parsed["distance"] == "Dot"
         @test !haskey(parsed, "hnsw_config")
 
-        # Test with nested struct
         cfg = CollectionConfig(
             vectors=VectorParams(size=128, distance=Cosine),
             hnsw_config=HnswConfig(m=32),
@@ -295,7 +281,6 @@ end
         @test p2["hnsw_config"]["m"] == 32
         @test !haskey(p2, "wal_config")
 
-        # Test Dict serialization
         d = Dict("a" => 1, "b" => nothing, "c" => [], "d" => "content")
         sd = serialize_body(d)
         pd = JSON.parse(sd)
@@ -305,7 +290,7 @@ end
         @test !haskey(pd, "c")
     end
 
-    # ── QdrantConnection / QdrantConnection ───────────────────────────────────────
+    # ── QdrantConnection ──────────────────────────────────────────────────
     @testset "QdrantConnection" begin
         c = QdrantConnection()
         @test c.transport isa HTTPTransport
@@ -320,7 +305,6 @@ end
         @test c2.transport.api_key == "secret"
         @test c2.transport.tls === true
 
-        # QdrantConnection alias
         c3 = QdrantConnection(host="test.com", port=1234)
         @test c3 isa QdrantConnection
         @test c3.transport.host == "test.com"
@@ -353,13 +337,12 @@ end
         @test !haskey(hd2, "api-key")
     end
 
-    # ── Global QdrantConnection ───────────────────────────────────────────────────
+    # ── Global QdrantConnection ─────────────────────────────────────────
     @testset "Global QdrantConnection" begin
         c1 = QdrantConnection(host="host1")
         set_client!(c1)
         @test get_client().transport.host == "host1"
 
-        # Restore default
         set_client!(QdrantConnection())
         @test get_client().transport.host == "localhost"
     end
@@ -422,14 +405,12 @@ end
                 @test result === true
 
                 colls = list_collections(CONN)
-                if colls isa AbstractDict && haskey(colls, "collections")
-                    names = [c["name"] for c in colls["collections"]]
-                    @test coll in names
-                end
+                @test colls isa Vector{CollectionDescription}
+                names = [c.name for c in colls]
+                @test coll in names
 
                 exists = collection_exists(CONN, coll)
-                @test exists isa AbstractDict
-                @test exists["exists"] === true
+                @test exists === true
 
                 info = get_collection(CONN, coll)
                 @test info["status"] == "green"
@@ -482,15 +463,13 @@ end
                 @test create_alias(CONN, a1, coll) === true
 
                 aliases = list_aliases(CONN)
-                if aliases isa AbstractDict && haskey(aliases, "aliases")
-                    alias_names = [a["alias_name"] for a in aliases["aliases"]]
-                    @test a1 in alias_names
-                end
+                @test aliases isa Vector{AliasDescription}
+                alias_names = [a.alias_name for a in aliases]
+                @test a1 in alias_names
 
                 ca = list_collection_aliases(CONN, coll)
-                if ca isa AbstractDict && haskey(ca, "aliases")
-                    @test any(a["alias_name"] == a1 for a in ca["aliases"])
-                end
+                @test ca isa Vector{AliasDescription}
+                @test any(a.alias_name == a1 for a in ca)
 
                 @test rename_alias(CONN, a1, a2) === true
                 @test delete_alias(CONN, a2) === true
@@ -507,28 +486,35 @@ end
                 pts = fixture_points()
 
                 res = upsert_points(CONN, coll, pts; wait=true)
-                @test res["status"] == "completed"
+                @test res isa UpdateResponse
+                @test res.status == "completed"
 
                 got = get_points(CONN, coll, [1, 2]; with_vectors=true, with_payload=true)
                 @test length(got) == 2
-                @test got[1]["id"] == 1
-                @test got[1]["payload"]["group"] == "a"
-                @test length(got[1]["vector"]) == 4
+                @test got[1] isa Record
+                @test got[1].id == 1
+                @test got[1].payload["group"] == "a"
+                @test length(got[1].vector) == 4
 
                 single = get_points(CONN, coll, 1; with_payload=true)
                 @test length(single) == 1
-                @test single[1]["id"] == 1
+                @test single[1].id == 1
+
+                rec = get_point(CONN, coll, 1)
+                @test rec isa Record
+                @test rec.id == 1
 
                 cnt = count_points(CONN, coll; exact=true)
-                @test cnt["count"] == 3
+                @test cnt isa CountResponse
+                @test cnt.count == 3
 
                 delete_points(CONN, coll, [2]; wait=true)
                 cnt2 = count_points(CONN, coll; exact=true)
-                @test cnt2["count"] == 2
+                @test cnt2.count == 2
 
                 delete_points(CONN, coll, 3; wait=true)
                 cnt3 = count_points(CONN, coll; exact=true)
-                @test cnt3["count"] == 1
+                @test cnt3.count == 1
 
                 cleanup_collection(CONN, coll)
             end
@@ -549,12 +535,12 @@ end
                                 payload=Dict{String,Any}("label" => "second")),
                 ]
                 res = upsert_points(CONN, coll, pts; wait=true)
-                @test res["status"] == "completed"
+                @test res.status == "completed"
 
                 got = get_points(CONN, coll, [u1]; with_payload=true)
                 @test length(got) == 1
-                @test got[1]["id"] == string(u1)
-                @test got[1]["payload"]["label"] == "first"
+                @test string(got[1].id) == string(u1)
+                @test got[1].payload["label"] == "first"
 
                 cleanup_collection(CONN, coll)
             end
@@ -568,22 +554,41 @@ end
                 upsert_points(CONN, coll, fixture_points(); wait=true)
 
                 res = set_payload(CONN, coll, Dict("flag" => true), [1, 2])
-                @test res["status"] == "completed"
+                @test res.status == "completed"
 
                 set_payload(CONN, coll, Dict("solo" => "yes"), 1)
 
                 after = get_points(CONN, coll, [1, 2]; with_payload=true)
-                @test after[1]["payload"]["flag"] === true
-                @test after[2]["payload"]["flag"] === true
-                @test after[1]["payload"]["solo"] == "yes"
+                @test after[1].payload["flag"] === true
+                @test after[2].payload["flag"] === true
+                @test after[1].payload["solo"] == "yes"
 
                 delete_payload(CONN, coll, ["flag"], [2])
                 p2 = get_points(CONN, coll, [2]; with_payload=true)
-                @test !haskey(p2[1]["payload"], "flag")
+                @test !haskey(p2[1].payload, "flag")
 
                 clear_payload(CONN, coll, [3]; wait=true)
                 p3 = get_points(CONN, coll, [3]; with_payload=true)
-                @test isempty(p3[1]["payload"])
+                @test isempty(p3[1].payload)
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Overwrite Payload ───────────────────────────────────────
+            @testset "Overwrite Payload" begin
+                coll = unique_name("overpay")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                res = overwrite_payload(CONN, coll, Dict("new_field" => "only"), [1])
+                @test res isa UpdateResponse
+                @test res.status == "completed"
+
+                p = get_points(CONN, coll, [1]; with_payload=true)
+                @test p[1].payload["new_field"] == "only"
+                @test !haskey(p[1].payload, "group")
 
                 cleanup_collection(CONN, coll)
             end
@@ -598,14 +603,14 @@ end
 
                 f = Filter(must=Any[Dict("key" => "group", "match" => Dict("value" => "a"))])
                 res = set_payload(CONN, coll, Dict("filtered" => true), f)
-                @test res["status"] == "completed"
+                @test res.status == "completed"
 
                 pts = get_points(CONN, coll, [1, 2]; with_payload=true)
-                @test pts[1]["payload"]["filtered"] === true
-                @test pts[2]["payload"]["filtered"] === true
+                @test pts[1].payload["filtered"] === true
+                @test pts[2].payload["filtered"] === true
 
                 p3 = get_points(CONN, coll, [3]; with_payload=true)
-                @test !haskey(p3[1]["payload"], "filtered")
+                @test !haskey(p3[1].payload, "filtered")
 
                 cleanup_collection(CONN, coll)
             end
@@ -619,71 +624,13 @@ end
                 upsert_points(CONN, coll, fixture_points(); wait=true)
 
                 result = scroll_points(CONN, coll; limit=10, with_payload=true)
-                @test length(result["points"]) == 3
+                @test result isa ScrollResponse
+                @test length(result.points) == 3
+                @test result.points[1] isa Record
 
                 result2 = scroll_points(CONN, coll; limit=2)
-                @test length(result2["points"]) == 2
-
-                cleanup_collection(CONN, coll)
-            end
-
-            # ── Search ──────────────────────────────────────────────────
-            @testset "Search" begin
-                coll = unique_name("search")
-                cleanup_collection(CONN, coll)
-                create_collection(CONN, coll,
-                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
-                upsert_points(CONN, coll, fixture_points(); wait=true)
-
-                hits = search_points(CONN, coll,
-                    SearchRequest(vector=Float32[1, 0, 0, 0], limit=2, with_payload=true))
-                @test length(hits) == 2
-                @test hits[1]["id"] == 1
-
-                hits2 = search_points(CONN, coll;
-                    vector=Float32[0, 1, 0, 0], limit=1, with_payload=true)
-                @test length(hits2) == 1
-                @test hits2[1]["id"] == 3
-
-                batch = search_batch(CONN, coll, [
-                    SearchRequest(vector=Float32[1, 0, 0, 0], limit=2),
-                    SearchRequest(vector=Float32[0, 1, 0, 0], limit=1),
-                ])
-                @test length(batch) == 2
-                @test length(batch[1]) == 2
-                @test length(batch[2]) == 1
-
-                cleanup_collection(CONN, coll)
-            end
-
-            # ── Search with SearchParams ────────────────────────────────
-            @testset "Search with SearchParams" begin
-                coll = unique_name("sparams")
-                cleanup_collection(CONN, coll)
-                create_collection(CONN, coll,
-                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
-                upsert_points(CONN, coll, fixture_points(); wait=true)
-
-                hits = search_points(CONN, coll,
-                    SearchRequest(vector=Float32[1, 0, 0, 0], limit=2,
-                        params=SearchParams(exact=true)))
-                @test length(hits) == 2
-
-                cleanup_collection(CONN, coll)
-            end
-
-            # ── Recommend ───────────────────────────────────────────────
-            @testset "Recommend" begin
-                coll = unique_name("rec")
-                cleanup_collection(CONN, coll)
-                create_collection(CONN, coll,
-                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
-                upsert_points(CONN, coll, fixture_points(); wait=true)
-
-                recs = recommend_points(CONN, coll,
-                    RecommendRequest(positive=Any[1], limit=2, with_payload=true))
-                @test length(recs) == 2
-                @test all(r["id"] != 1 for r in recs)
+                @test length(result2.points) == 2
+                @test result2.next_page_offset !== nothing
 
                 cleanup_collection(CONN, coll)
             end
@@ -698,34 +645,58 @@ end
 
                 qr = query_points(CONN, coll,
                     QueryRequest(query=Float32[1, 0, 0, 0], limit=2, with_payload=true))
-                @test haskey(qr, "points")
-                @test length(qr["points"]) == 2
-                @test qr["points"][1]["id"] == 1
+                @test qr isa QueryResponse
+                @test length(qr.points) == 2
+                @test qr.points[1] isa ScoredPoint
+                @test qr.points[1].id == 1
 
                 qb = query_batch(CONN, coll, [
                     QueryRequest(query=Float32[1, 0, 0, 0], limit=2),
                     QueryRequest(query=Float32[0, 1, 0, 0], limit=1),
                 ])
                 @test length(qb) == 2
+                @test qb[1] isa QueryResponse
+                @test length(qb[1].points) == 2
+                @test length(qb[2].points) == 1
 
                 cleanup_collection(CONN, coll)
             end
 
-            # ── Discovery ───────────────────────────────────────────────
-            @testset "Discovery" begin
-                coll = unique_name("disc")
+            # ── Query with Filter ───────────────────────────────────────
+            @testset "Query with Filter" begin
+                coll = unique_name("qfilt")
                 cleanup_collection(CONN, coll)
                 create_collection(CONN, coll,
                     CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
                 upsert_points(CONN, coll, fixture_points(); wait=true)
 
-                disc = discover_points(CONN, coll,
-                    DiscoverRequest(target=Float32[1, 0, 0, 0], limit=2,
-                        context=Any[
-                            Dict("positive" => 1, "negative" => 3)
-                        ],
-                        with_payload=true))
-                @test length(disc) >= 1
+                create_payload_index(CONN, coll, "group";
+                    field_schema="keyword", wait=true)
+
+                f = Filter(must=Any[
+                    Dict("key" => "group", "match" => Dict("value" => "a"))
+                ])
+                qr = query_points(CONN, coll,
+                    QueryRequest(query=Float32[1, 0, 0, 0], limit=10,
+                        filter=f, with_payload=true))
+                @test length(qr.points) == 2
+                @test all(p.payload["group"] == "a" for p in qr.points)
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Query with SearchParams ─────────────────────────────────
+            @testset "Query with SearchParams" begin
+                coll = unique_name("qparams")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                qr = query_points(CONN, coll,
+                    QueryRequest(query=Float32[1, 0, 0, 0], limit=2,
+                        params=SearchParams(exact=true)))
+                @test length(qr.points) == 2
 
                 cleanup_collection(CONN, coll)
             end
@@ -739,16 +710,30 @@ end
                 upsert_points(CONN, coll, fixture_points(); wait=true)
 
                 snap = create_snapshot(CONN, coll)
-                @test haskey(snap, "name")
+                @test snap isa SnapshotInfo
+                @test !isempty(snap.name)
 
                 snaps = list_snapshots(CONN, coll)
+                @test snaps isa Vector{SnapshotInfo}
                 @test length(snaps) >= 1
-                snap_names = [s isa AbstractDict ? s["name"] : "" for s in snaps]
-                @test snap["name"] in snap_names
+                @test snap.name in [s.name for s in snaps]
 
-                @test delete_snapshot(CONN, coll, snap["name"]) === true
+                @test delete_snapshot(CONN, coll, snap.name) === true
 
                 cleanup_collection(CONN, coll)
+            end
+
+            # ── Full Snapshots ──────────────────────────────────────────
+            @testset "Full Snapshots" begin
+                snap = create_full_snapshot(CONN)
+                @test snap isa SnapshotInfo
+                @test !isempty(snap.name)
+
+                snaps = list_full_snapshots(CONN)
+                @test snaps isa Vector{SnapshotInfo}
+                @test length(snaps) >= 1
+
+                @test delete_full_snapshot(CONN, snap.name) === true
             end
 
             # ── Payload Index ───────────────────────────────────────────
@@ -761,14 +746,15 @@ end
 
                 res = create_payload_index(CONN, coll, "group";
                     field_schema="keyword", wait=true)
-                @test res["status"] == "completed"
+                @test res isa UpdateResponse
+                @test res.status == "completed"
 
                 res2 = create_payload_index(CONN, coll, "n";
                     field_schema="integer", wait=true)
-                @test res2["status"] == "completed"
+                @test res2.status == "completed"
 
                 res3 = delete_payload_index(CONN, coll, "group"; wait=true)
-                @test res3["status"] == "completed"
+                @test res3.status == "completed"
 
                 cleanup_collection(CONN, coll)
             end
@@ -791,7 +777,7 @@ end
                 tip = TextIndexParams(tokenizer="word", lowercase=true)
                 res = create_payload_index(CONN, coll, "text";
                     field_schema=tip, wait=true)
-                @test res["status"] == "completed"
+                @test res.status == "completed"
 
                 cleanup_collection(CONN, coll)
             end
@@ -825,20 +811,21 @@ end
                 ]
                 upsert_points(CONN, coll, pts; wait=true)
 
-                # Search with NamedVector struct
-                hits = search_points(CONN, coll,
-                    SearchRequest(
-                        vector=NamedVector(name="image", vector=Float32[1, 0, 0, 0]),
+                qr = query_points(CONN, coll,
+                    QueryRequest(
+                        query=Float32[1, 0, 0, 0],
+                        using_="image",
                         limit=2, with_payload=true))
-                @test length(hits) == 2
-                @test hits[1]["id"] == 1
+                @test length(qr.points) == 2
+                @test qr.points[1].id == 1
 
-                hits2 = search_points(CONN, coll,
-                    SearchRequest(
-                        vector=NamedVector(name="text", vector=Float32[1, 0, 0, 0]),
+                qr2 = query_points(CONN, coll,
+                    QueryRequest(
+                        query=Float32[1, 0, 0, 0],
+                        using_="text",
                         limit=2, with_payload=true))
-                @test length(hits2) == 2
-                @test hits2[1]["id"] == 2
+                @test length(qr2.points) == 2
+                @test qr2.points[1].id == 2
 
                 cleanup_collection(CONN, coll)
             end
@@ -866,7 +853,7 @@ end
                 ])
 
                 got = get_points(CONN, coll, [1]; with_vectors=true)
-                v = got[1]["vector"]["dense"]
+                v = got[1].vector["dense"]
                 @test v[1] ≈ 0.5 atol=0.01
                 @test v[2] ≈ 0.5 atol=0.01
 
@@ -878,10 +865,19 @@ end
             # ── Service API ─────────────────────────────────────────────
             @testset "Service API" begin
                 health = health_check(CONN)
-                @test health["status"] == "healthy"
+                @test health isa HealthResponse
+                @test contains(health.title, "qdrant")
+                @test !isempty(health.version)
+
+                ver = get_version(CONN)
+                @test ver isa HealthResponse
+                @test ver.version == health.version
 
                 telemetry = get_telemetry(CONN)
                 @test telemetry isa AbstractDict
+
+                metrics = get_metrics(CONN)
+                @test metrics isa String
             end
 
             # ── Cluster / Distributed ───────────────────────────────────
@@ -907,33 +903,11 @@ end
                     )),
                 ]
                 res = batch_points(CONN, coll, ops; wait=true)
-                @test res isa AbstractVector
+                @test res isa Vector{UpdateResponse}
+                @test length(res) >= 1
 
                 cnt = count_points(CONN, coll; exact=true)
-                @test cnt["count"] == 2
-
-                cleanup_collection(CONN, coll)
-            end
-
-            # ── Search with Filter ──────────────────────────────────────
-            @testset "Search with Filter" begin
-                coll = unique_name("sfilt")
-                cleanup_collection(CONN, coll)
-                create_collection(CONN, coll,
-                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
-                upsert_points(CONN, coll, fixture_points(); wait=true)
-
-                create_payload_index(CONN, coll, "group";
-                    field_schema="keyword", wait=true)
-
-                f = Filter(must=Any[
-                    Dict("key" => "group", "match" => Dict("value" => "a"))
-                ])
-                hits = search_points(CONN, coll,
-                    SearchRequest(vector=Float32[1, 0, 0, 0], limit=10,
-                        filter=f, with_payload=true))
-                @test length(hits) == 2
-                @test all(h["payload"]["group"] == "a" for h in hits)
+                @test cnt.count == 2
 
                 cleanup_collection(CONN, coll)
             end
@@ -950,6 +924,24 @@ end
                         indexing_threshold=10000
                     )))
                 @test result === true
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Facet ───────────────────────────────────────────────────
+            @testset "Facet" begin
+                coll = unique_name("facet")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+                create_payload_index(CONN, coll, "group";
+                    field_schema="keyword", wait=true)
+
+                result = facet(CONN, coll, "group")
+                @test result isa FacetResponse
+                @test length(result.hits) >= 1
+                @test result.hits[1] isa FacetHit
 
                 cleanup_collection(CONN, coll)
             end
@@ -978,17 +970,11 @@ end
             @info "Benchmark: upsert $n_points points" time_s=round(t_upsert, digits=3)
 
             query_vec = Float32.(randn(128))
-            t_search = @elapsed for _ in 1:10
-                search_points(CONN, coll,
-                    SearchRequest(vector=query_vec, limit=10))
-            end
-            @test t_search < 30.0
-            @info "Benchmark: 10 searches" time_s=round(t_search, digits=3) per_search=round(t_search/10, digits=4)
-
             t_query = @elapsed for _ in 1:10
                 query_points(CONN, coll,
                     QueryRequest(query=query_vec, limit=10))
             end
+            @test t_query < 30.0
             @info "Benchmark: 10 queries" time_s=round(t_query, digits=3) per_query=round(t_query/10, digits=4)
 
             t_scroll = @elapsed scroll_points(CONN, coll; limit=100, with_payload=true)
@@ -1010,7 +996,7 @@ end
         end
     end
 
-end  # QdrantClient.jl v0.3.0
+end  # QdrantClient.jl v1.0
 
 # ── gRPC Tests ───────────────────────────────────────────────────────────
 include("test_grpc.jl")

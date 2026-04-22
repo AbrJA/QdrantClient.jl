@@ -10,44 +10,36 @@ function upsert_points(c::QdrantConnection, collection::AbstractString,
     transport = c.transport::GRPCTransport
     proto_points = qdrant.PointStruct[to_proto_point(p) for p in points]
     req = qdrant.UpsertPoints(
-        collection,
-        wait,
-        proto_points,
+        collection, wait, proto_points,
         to_proto_ordering(ordering),
-        nothing,  # shard_key_selector
-        nothing,  # update_filter
-        UInt64(0),  # timeout
-        qdrant.UpdateMode.Upsert,  # update_mode
+        nothing, nothing, UInt64(0),
+        qdrant.UpdateMode.Upsert,
     )
     resp = grpc_request(transport, Points_Upsert_Client, req)
-    _operation_response_to_dict(resp)
+    _grpc_update_response(resp)
 end
 
-function _operation_response_to_dict(resp::qdrant.PointsOperationResponse)
-    result = Dict{String,Any}("time" => resp.time)
-    if resp.result !== nothing
-        result["status"] = string(resp.result.status)
-    end
-    result
+function _grpc_update_response(resp::qdrant.PointsOperationResponse)
+    status = resp.result !== nothing ? string(resp.result.status) : "completed"
+    # Normalize gRPC status enum to match HTTP
+    normalized = contains(lowercase(status), "completed") ? "completed" :
+                 contains(lowercase(status), "acknowledged") ? "acknowledged" : status
+    UpdateResponse(0, normalized)
 end
 
 # ── Delete Points ────────────────────────────────────────────────────────
 
 function delete_points(c::QdrantConnection, collection::AbstractString,
                        selector::Union{AbstractVector{<:PointId}, PointId, Filter},
-                       ::Val{:grpc};
-                       wait::Bool=true)
+                       ::Val{:grpc}; wait::Bool=true)
     transport = c.transport::GRPCTransport
     req = qdrant.DeletePoints(
-        collection,
-        wait,
+        collection, wait,
         to_proto_points_selector(selector),
-        nothing,  # ordering
-        nothing,  # shard_key_selector
-        UInt64(0),  # timeout
+        nothing, nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_Delete_Client, req)
-    _operation_response_to_dict(resp)
+    _grpc_update_response(resp)
 end
 
 # ── Get Points ───────────────────────────────────────────────────────────
@@ -58,16 +50,21 @@ function get_points(c::QdrantConnection, collection::AbstractString,
     transport = c.transport::GRPCTransport
     proto_ids = qdrant.PointId[to_proto_point_id(id) for id in ids]
     req = qdrant.GetPoints(
-        collection,
-        proto_ids,
+        collection, proto_ids,
         to_proto_with_payload(with_payload),
         to_proto_with_vectors(with_vectors),
-        nothing,  # read_consistency
-        nothing,  # shard_key_selector
-        UInt64(0),  # timeout
+        nothing, nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_Get_Client, req)
-    [from_proto_retrieved_point(rp) for rp in resp.result]
+    Record[_grpc_to_record(rp) for rp in resp.result]
+end
+
+function _grpc_to_record(rp::qdrant.RetrievedPoint)
+    Record(
+        from_proto_point_id(rp.id),
+        isempty(rp.payload) ? nothing : from_proto_payload(rp.payload),
+        from_proto_vectors(rp.vectors),
+    )
 end
 
 # ── Set Payload ──────────────────────────────────────────────────────────
@@ -75,29 +72,31 @@ end
 function set_payload(c::QdrantConnection, collection::AbstractString,
                      payload::AbstractDict,
                      selector::Union{AbstractVector{<:PointId}, PointId, Filter},
-                     ::Val{:grpc};
-                     wait::Bool=true)
+                     ::Val{:grpc}; wait::Bool=true)
     transport = c.transport::GRPCTransport
-    proto_payload = to_proto_payload(payload)
-    points_selector = if selector isa Filter
-        to_proto_points_selector(selector)
-    elseif selector isa PointId
-        to_proto_points_selector([selector])
-    else
-        to_proto_points_selector(selector)
-    end
+    ps = selector isa PointId ? to_proto_points_selector([selector]) : to_proto_points_selector(selector)
     req = qdrant.SetPayloadPoints(
-        collection,
-        wait,
-        proto_payload,
-        points_selector,
-        nothing,  # ordering
-        nothing,  # shard_key_selector
-        "",       # key
-        UInt64(0),  # timeout
+        collection, wait, to_proto_payload(payload),
+        ps, nothing, nothing, "", UInt64(0),
     )
     resp = grpc_request(transport, Points_SetPayload_Client, req)
-    _operation_response_to_dict(resp)
+    _grpc_update_response(resp)
+end
+
+# ── Overwrite Payload ────────────────────────────────────────────────────
+
+function overwrite_payload(c::QdrantConnection, collection::AbstractString,
+                           payload::AbstractDict,
+                           selector::Union{AbstractVector{<:PointId}, PointId, Filter},
+                           ::Val{:grpc}; wait::Bool=true)
+    transport = c.transport::GRPCTransport
+    ps = selector isa PointId ? to_proto_points_selector([selector]) : to_proto_points_selector(selector)
+    req = qdrant.SetPayloadPoints(
+        collection, wait, to_proto_payload(payload),
+        ps, nothing, nothing, "", UInt64(0),
+    )
+    resp = grpc_request(transport, Points_OverwritePayload_Client, req)
+    _grpc_update_response(resp)
 end
 
 # ── Delete Payload ───────────────────────────────────────────────────────
@@ -105,72 +104,49 @@ end
 function delete_payload(c::QdrantConnection, collection::AbstractString,
                         keys::AbstractVector{<:AbstractString},
                         selector::Union{AbstractVector{<:PointId}, PointId, Filter},
-                        ::Val{:grpc};
-                        wait::Bool=true)
+                        ::Val{:grpc}; wait::Bool=true)
     transport = c.transport::GRPCTransport
-    points_selector = if selector isa Filter
-        to_proto_points_selector(selector)
-    elseif selector isa PointId
-        to_proto_points_selector([selector])
-    else
-        to_proto_points_selector(selector)
-    end
+    ps = selector isa PointId ? to_proto_points_selector([selector]) : to_proto_points_selector(selector)
     req = qdrant.DeletePayloadPoints(
-        collection,
-        wait,
-        String.(keys),
-        points_selector,
-        nothing,  # ordering
-        nothing,  # shard_key_selector
-        UInt64(0),  # timeout
+        collection, wait, String.(keys),
+        ps, nothing, nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_DeletePayload_Client, req)
-    _operation_response_to_dict(resp)
+    _grpc_update_response(resp)
 end
 
 # ── Clear Payload ────────────────────────────────────────────────────────
 
 function clear_payload(c::QdrantConnection, collection::AbstractString,
                        selector::Union{AbstractVector{<:PointId}, PointId, Filter},
-                       ::Val{:grpc};
-                       wait::Bool=true)
+                       ::Val{:grpc}; wait::Bool=true)
     transport = c.transport::GRPCTransport
     req = qdrant.ClearPayloadPoints(
-        collection,
-        wait,
+        collection, wait,
         to_proto_points_selector(selector),
-        nothing,  # ordering
-        nothing,  # shard_key_selector
-        UInt64(0),  # timeout
+        nothing, nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_ClearPayload_Client, req)
-    _operation_response_to_dict(resp)
+    _grpc_update_response(resp)
 end
 
 # ── Update Vectors ───────────────────────────────────────────────────────
 
 function update_vectors(c::QdrantConnection, collection::AbstractString,
-                        points::AbstractVector, ::Val{:grpc};
-                        wait::Bool=true)
+                        points::AbstractVector, ::Val{:grpc}; wait::Bool=true)
     transport = c.transport::GRPCTransport
     proto_points = qdrant.PointVectors[]
     for p in points
         id = to_proto_point_id(p isa AbstractDict ? p["id"] : p.id)
         vec = p isa AbstractDict ? p["vector"] : p.vector
-        vectors = to_proto_vectors(vec)
-        push!(proto_points, qdrant.PointVectors(id, vectors))
+        push!(proto_points, qdrant.PointVectors(id, to_proto_vectors(vec)))
     end
     req = qdrant.UpdatePointVectors(
-        collection,
-        wait,
-        proto_points,
-        nothing,  # ordering
-        nothing,  # shard_key_selector
-        nothing,  # update_filter
-        UInt64(0),  # timeout
+        collection, wait, proto_points,
+        nothing, nothing, nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_UpdateVectors_Client, req)
-    _operation_response_to_dict(resp)
+    _grpc_update_response(resp)
 end
 
 # ── Delete Vectors ───────────────────────────────────────────────────────
@@ -178,20 +154,16 @@ end
 function delete_vectors(c::QdrantConnection, collection::AbstractString,
                         names::AbstractVector{<:AbstractString},
                         selector::Union{AbstractVector{<:PointId}, PointId, Filter},
-                        ::Val{:grpc};
-                        wait::Bool=true)
+                        ::Val{:grpc}; wait::Bool=true)
     transport = c.transport::GRPCTransport
     req = qdrant.DeletePointVectors(
-        collection,
-        wait,
+        collection, wait,
         to_proto_points_selector(selector),
         qdrant.VectorsSelector(String.(names)),
-        nothing,  # ordering
-        nothing,  # shard_key_selector
-        UInt64(0),  # timeout
+        nothing, nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_DeleteVectors_Client, req)
-    _operation_response_to_dict(resp)
+    _grpc_update_response(resp)
 end
 
 # ── Scroll Points ────────────────────────────────────────────────────────
@@ -207,23 +179,15 @@ function scroll_points(c::QdrantConnection, collection::AbstractString,
         proto_offset = to_proto_point_id(offset isa PointId ? offset : Int(offset))
     end
     req = qdrant.ScrollPoints(
-        collection,
-        to_proto_filter(filter),
-        proto_offset,
-        UInt32(limit),
-        to_proto_with_payload(with_payload),
+        collection, to_proto_filter(filter), proto_offset,
+        UInt32(limit), to_proto_with_payload(with_payload),
         to_proto_with_vectors(with_vectors),
-        nothing,  # read_consistency
-        nothing,  # shard_key_selector
-        nothing,  # order_by
-        UInt64(0),  # timeout
+        nothing, nothing, nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_Scroll_Client, req)
-    result = Dict{String,Any}(
-        "points" => [from_proto_retrieved_point(rp) for rp in resp.result],
-    )
-    resp.next_page_offset !== nothing && (result["next_page_offset"] = from_proto_point_id(resp.next_page_offset))
-    result
+    points = Record[_grpc_to_record(rp) for rp in resp.result]
+    npo = resp.next_page_offset !== nothing ? from_proto_point_id(resp.next_page_offset) : nothing
+    ScrollResponse(points, npo)
 end
 
 # ── Count Points ─────────────────────────────────────────────────────────
@@ -233,15 +197,11 @@ function count_points(c::QdrantConnection, collection::AbstractString,
                       filter::Optional{Filter}=nothing, exact::Bool=false)
     transport = c.transport::GRPCTransport
     req = qdrant.CountPoints(
-        collection,
-        to_proto_filter(filter),
-        exact,
-        nothing,  # read_consistency
-        nothing,  # shard_key_selector
-        UInt64(0),  # timeout
+        collection, to_proto_filter(filter), exact,
+        nothing, nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_Count_Client, req)
-    Dict{String,Any}("count" => Int(resp.result.count))
+    CountResponse(Int(resp.result.count))
 end
 
 # ── Create Field Index ───────────────────────────────────────────────────
@@ -265,25 +225,15 @@ function create_payload_index(c::QdrantConnection, collection::AbstractString,
                 field_schema.lowercase !== nothing ? field_schema.lowercase : false,
                 field_schema.min_token_len !== nothing ? UInt64(field_schema.min_token_len) : UInt64(0),
                 field_schema.max_token_len !== nothing ? UInt64(field_schema.max_token_len) : UInt64(0),
-                false,  # on_disk
-                nothing,  # stopwords
-                false,  # phrase_matching
-                nothing,  # stemmer
-                false,  # ascii_folding
-                false,  # enable_hnsw
+                false, nothing, false, nothing, false, false,
             )))
     end
     req = qdrant.CreateFieldIndexCollection(
-        collection,
-        wait,
-        field_name,
-        field_type,
-        field_index_params,
-        nothing,  # ordering
-        UInt64(0),  # timeout
+        collection, wait, field_name, field_type,
+        field_index_params, nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_CreateFieldIndex_Client, req)
-    _operation_response_to_dict(resp)
+    _grpc_update_response(resp)
 end
 
 function _string_to_field_type(s::AbstractString)
@@ -313,12 +263,9 @@ function delete_payload_index(c::QdrantConnection, collection::AbstractString,
                               wait::Bool=true)
     transport = c.transport::GRPCTransport
     req = qdrant.DeleteFieldIndexCollection(
-        collection,
-        wait,
-        field_name,
-        nothing,  # ordering
-        UInt64(0),  # timeout
+        collection, wait, field_name,
+        nothing, UInt64(0),
     )
     resp = grpc_request(transport, Points_DeleteFieldIndex_Client, req)
-    _operation_response_to_dict(resp)
+    _grpc_update_response(resp)
 end
