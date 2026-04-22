@@ -44,7 +44,7 @@ Retrieve Prometheus-format metrics (plain text response).
 function get_metrics(client::QdrantClient{HTTPTransport}=get_client();
                      timeout::Optional{Int}=nothing)
     resp = http_request(HTTP.get, client, "/metrics"; query=_timeout_query(timeout))
-    QdrantResponse(String(resp.body), "ok", 0.0)
+    QdrantResponse(String(resp.body), "", 0.0)
 end
 
 """
@@ -68,7 +68,7 @@ Kubernetes health check endpoint (plain text response).
 """
 function healthz(client::QdrantClient{HTTPTransport}=get_client())
     resp = http_request(HTTP.get, client, "/healthz")
-    QdrantResponse(String(resp.body), "ok", 0.0)
+    QdrantResponse(String(resp.body), "", 0.0)
 end
 
 """
@@ -78,7 +78,7 @@ Kubernetes liveness probe (plain text response).
 """
 function livez(client::QdrantClient{HTTPTransport}=get_client())
     resp = http_request(HTTP.get, client, "/livez")
-    QdrantResponse(String(resp.body), "ok", 0.0)
+    QdrantResponse(String(resp.body), "", 0.0)
 end
 
 """
@@ -88,7 +88,7 @@ Kubernetes readiness probe (plain text response).
 """
 function readyz(client::QdrantClient{HTTPTransport}=get_client())
     resp = http_request(HTTP.get, client, "/readyz")
-    QdrantResponse(String(resp.body), "ok", 0.0)
+    QdrantResponse(String(resp.body), "", 0.0)
 end
 
 # ── Issues ───────────────────────────────────────────────────────────────
