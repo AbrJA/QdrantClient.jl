@@ -1,21 +1,21 @@
-# QdrantClient.jl
+# Qdrant.jl
 
 A high-performance, idiomatic Julia client for the [Qdrant](https://qdrant.tech/) vector database with HTTP/REST and gRPC support.
 
 ## Getting Started
 
 ```julia
-using QdrantClient
+using Qdrant
 
-conn = QdrantConnection()
-create_collection(conn, "demo",
+client = QdrantClient()
+create_collection(client, "demo",
     CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
 
-upsert_points(conn, "demo", [
+upsert_points(client, "demo", [
     Point(id=1, vector=Float32[1, 0, 0, 0], payload=Dict("color" => "red")),
 ]; wait=true)
 
-resp = query_points(conn, "demo"; query=Float32[1, 0, 0, 0], limit=5, with_payload=true)
+resp = query_points(client, "demo"; query=Float32[1, 0, 0, 0], limit=5, with_payload=true)
 resp.result.points   # Vector{ScoredPoint}
 ```
 
@@ -24,8 +24,8 @@ Every API call returns [`QdrantResponse{T}`](@ref) with `.result`, `.status`, an
 ## API
 
 ```@docs
+Qdrant
 QdrantClient
-QdrantConnection
 AbstractTransport
 HTTPTransport
 GRPCTransport

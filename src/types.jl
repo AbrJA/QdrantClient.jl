@@ -68,7 +68,7 @@ Standard envelope wrapping every API return value.
 
 # Examples
 ```julia
-resp = upsert_points(conn, "demo", points)
+resp = upsert_points(client, "demo", points)
 resp.result   # UpdateResult(operation_id=0, status="completed")
 resp.status   # "ok"
 resp.time     # 0.001

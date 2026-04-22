@@ -3,73 +3,73 @@
 # ============================================================================
 
 """
-    cluster_status(conn) -> QdrantResponse{Dict{String,Any}}
+    cluster_status(client) -> QdrantResponse{Dict{String,Any}}
 
 Get cluster status information.
 """
-function cluster_status(conn::QdrantConnection{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, conn, "/cluster")
+function cluster_status(client::QdrantClient{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, client, "/cluster")
     raw, status, time = _unwrap(resp)
     QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
 
 """
-    cluster_telemetry(conn) -> QdrantResponse{Dict{String,Any}}
+    cluster_telemetry(client) -> QdrantResponse{Dict{String,Any}}
 
 Get cluster-wide telemetry (peers, collections, shard transfers).
 """
-function cluster_telemetry(conn::QdrantConnection{HTTPTransport}=get_client();
+function cluster_telemetry(client::QdrantClient{HTTPTransport}=get_client();
                            timeout::Optional{Int}=nothing)
-    resp = http_request(HTTP.get, conn, "/cluster/telemetry";
+    resp = http_request(HTTP.get, client, "/cluster/telemetry";
                         query=_timeout_query(timeout))
     raw, status, time = _unwrap(resp)
     QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
 
 """
-    recover_current_peer(conn) -> QdrantResponse{Bool}
+    recover_current_peer(client) -> QdrantResponse{Bool}
 
 Attempt to recover the current peer.
 """
-function recover_current_peer(conn::QdrantConnection{HTTPTransport}=get_client())
-    parse_bool(http_request(HTTP.post, conn, "/cluster/recover"))
+function recover_current_peer(client::QdrantClient{HTTPTransport}=get_client())
+    parse_bool(http_request(HTTP.post, client, "/cluster/recover"))
 end
 
 """
-    remove_peer(conn, peer_id; force=false) -> QdrantResponse{Bool}
+    remove_peer(client, peer_id; force=false) -> QdrantResponse{Bool}
 
 Remove a peer from the cluster. Fails if peer still has shards.
 """
-function remove_peer(conn::QdrantConnection{HTTPTransport}, peer_id::Integer;
+function remove_peer(client::QdrantClient{HTTPTransport}, peer_id::Integer;
                      force::Bool=false, timeout::Optional{Int}=nothing)
     q = Dict{String,Any}()
     force && (q["force"] = "true")
     timeout !== nothing && (q["timeout"] = timeout)
     kw = isempty(q) ? (;) : (; query=q)
-    parse_bool(http_request(HTTP.delete, conn, "/cluster/peer/$peer_id"; kw...))
+    parse_bool(http_request(HTTP.delete, client, "/cluster/peer/$peer_id"; kw...))
 end
 
 """
-    collection_cluster_info(conn, collection) -> QdrantResponse{Dict{String,Any}}
+    collection_cluster_info(client, collection) -> QdrantResponse{Dict{String,Any}}
 
 Get cluster information for a collection.
 """
-function collection_cluster_info(conn::QdrantConnection{HTTPTransport}, name::AbstractString)
-    resp = http_request(HTTP.get, conn, "/collections/$name/cluster")
+function collection_cluster_info(client::QdrantClient{HTTPTransport}, name::AbstractString)
+    resp = http_request(HTTP.get, client, "/collections/$name/cluster")
     raw, status, time = _unwrap(resp)
     QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
 collection_cluster_info(name::AbstractString) = collection_cluster_info(get_client(), name)
 
 """
-    update_collection_cluster(conn, collection, operations) -> QdrantResponse{Bool}
+    update_collection_cluster(client, collection, operations) -> QdrantResponse{Bool}
 
 Update collection cluster configuration (move/replicate shards).
 """
-function update_collection_cluster(conn::QdrantConnection{HTTPTransport},
+function update_collection_cluster(client::QdrantClient{HTTPTransport},
                                    name::AbstractString, body::AbstractDict;
                                    timeout::Optional{Int}=nothing)
-    parse_bool(http_request(HTTP.post, conn, "/collections/$name/cluster", body;
+    parse_bool(http_request(HTTP.post, client, "/collections/$name/cluster", body;
                             query=_timeout_query(timeout)))
 end
 update_collection_cluster(name::AbstractString, body::AbstractDict; kwargs...) =
@@ -78,40 +78,40 @@ update_collection_cluster(name::AbstractString, body::AbstractDict; kwargs...) =
 # ── Shard Keys ───────────────────────────────────────────────────────────
 
 """
-    list_shard_keys(conn, collection) -> QdrantResponse{Dict{String,Any}}
+    list_shard_keys(client, collection) -> QdrantResponse{Dict{String,Any}}
 
 List shard keys for a collection.
 """
-function list_shard_keys(conn::QdrantConnection{HTTPTransport}, name::AbstractString)
-    resp = http_request(HTTP.get, conn, "/collections/$name/shards")
+function list_shard_keys(client::QdrantClient{HTTPTransport}, name::AbstractString)
+    resp = http_request(HTTP.get, client, "/collections/$name/shards")
     raw, status, time = _unwrap(resp)
     QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
 list_shard_keys(name::AbstractString) = list_shard_keys(get_client(), name)
 
 """
-    create_shard_key(conn, collection, request) -> QdrantResponse{Bool}
+    create_shard_key(client, collection, request) -> QdrantResponse{Bool}
 
 Create a shard key for a collection.
 """
-function create_shard_key(conn::QdrantConnection{HTTPTransport},
+function create_shard_key(client::QdrantClient{HTTPTransport},
                           name::AbstractString, body::AbstractDict;
                           timeout::Optional{Int}=nothing)
-    parse_bool(http_request(HTTP.put, conn, "/collections/$name/shards", body;
+    parse_bool(http_request(HTTP.put, client, "/collections/$name/shards", body;
                             query=_timeout_query(timeout)))
 end
 create_shard_key(name::AbstractString, body::AbstractDict; kwargs...) =
     create_shard_key(get_client(), name, body; kwargs...)
 
 """
-    delete_shard_key(conn, collection, request) -> QdrantResponse{Bool}
+    delete_shard_key(client, collection, request) -> QdrantResponse{Bool}
 
 Delete a shard key from a collection.
 """
-function delete_shard_key(conn::QdrantConnection{HTTPTransport},
+function delete_shard_key(client::QdrantClient{HTTPTransport},
                           name::AbstractString, body::AbstractDict;
                           timeout::Optional{Int}=nothing)
-    parse_bool(http_request(HTTP.post, conn, "/collections/$name/shards/delete", body;
+    parse_bool(http_request(HTTP.post, client, "/collections/$name/shards/delete", body;
                             query=_timeout_query(timeout)))
 end
 delete_shard_key(name::AbstractString, body::AbstractDict; kwargs...) =
@@ -120,33 +120,33 @@ delete_shard_key(name::AbstractString, body::AbstractDict; kwargs...) =
 # ── Shard Snapshots ──────────────────────────────────────────────────────
 
 """
-    create_shard_snapshot(conn, collection, shard_id) -> QdrantResponse{SnapshotInfo}
+    create_shard_snapshot(client, collection, shard_id) -> QdrantResponse{SnapshotInfo}
 
 Create a snapshot for a specific shard.
 """
-function create_shard_snapshot(conn::QdrantConnection{HTTPTransport},
+function create_shard_snapshot(client::QdrantClient{HTTPTransport},
                                name::AbstractString, shard_id::Integer)
-    parse_snapshot(http_request(HTTP.post, conn, "/collections/$name/shards/$shard_id/snapshots"))
+    parse_snapshot(http_request(HTTP.post, client, "/collections/$name/shards/$shard_id/snapshots"))
 end
 
 """
-    list_shard_snapshots(conn, collection, shard_id) -> QdrantResponse{Vector{SnapshotInfo}}
+    list_shard_snapshots(client, collection, shard_id) -> QdrantResponse{Vector{SnapshotInfo}}
 
 List snapshots for a specific shard.
 """
-function list_shard_snapshots(conn::QdrantConnection{HTTPTransport},
+function list_shard_snapshots(client::QdrantClient{HTTPTransport},
                               name::AbstractString, shard_id::Integer)
-    parse_snapshot_list(http_request(HTTP.get, conn, "/collections/$name/shards/$shard_id/snapshots"))
+    parse_snapshot_list(http_request(HTTP.get, client, "/collections/$name/shards/$shard_id/snapshots"))
 end
 
 """
-    delete_shard_snapshot(conn, collection, shard_id, snapshot_name) -> QdrantResponse{Bool}
+    delete_shard_snapshot(client, collection, shard_id, snapshot_name) -> QdrantResponse{Bool}
 
 Delete a snapshot for a specific shard.
 """
-function delete_shard_snapshot(conn::QdrantConnection{HTTPTransport},
+function delete_shard_snapshot(client::QdrantClient{HTTPTransport},
                                name::AbstractString, shard_id::Integer,
                                snapshot_name::AbstractString)
-    parse_bool(http_request(HTTP.delete, conn,
+    parse_bool(http_request(HTTP.delete, client,
         "/collections/$name/shards/$shard_id/snapshots/$snapshot_name"))
 end

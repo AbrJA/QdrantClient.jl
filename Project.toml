@@ -1,5 +1,5 @@
-name = "QdrantClient"
-uuid = "18f42571-9ca3-47e3-9e7d-7108c8924fb3"
+name = "Qdrant"
+uuid = "dbfca70a-f45c-4ba8-8c04-a9b96ef74a4f"
 version = "1.0.0"
 authors = ["AbrJA <abraham.jaimes.mx@gmail.com>"]
 
@@ -14,10 +14,10 @@ gRPCClient = "aaca4a50-36af-4a1d-b878-4c443f2061ad"
 [compat]
 HTTP = "1"
 JSON = "1"
-ProtoBuf = "1.2.3"
+ProtoBuf = "1"
 StructUtils = "2"
-gRPCClient = "1.0.1"
-julia = "1.12"
+gRPCClient = "1"
+julia = "1"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

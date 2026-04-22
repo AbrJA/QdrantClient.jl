@@ -3,13 +3,13 @@
 # ============================================================================
 
 """
-    health_check(conn) -> QdrantResponse{HealthInfo}
+    health_check(client) -> QdrantResponse{HealthInfo}
 
 Check server health.
 """
-function health_check(conn::QdrantConnection{HTTPTransport}=get_client())
+function health_check(client::QdrantClient{HTTPTransport}=get_client())
     try
-        resp = http_request(HTTP.get, conn, "/")
+        resp = http_request(HTTP.get, client, "/")
         raw, status, time = _unwrap(resp)
         info = raw isa AbstractDict ?
             HealthInfo(String(get(raw, "title", "qdrant")),
@@ -22,12 +22,12 @@ function health_check(conn::QdrantConnection{HTTPTransport}=get_client())
 end
 
 """
-    get_version(conn) -> QdrantResponse{HealthInfo}
+    get_version(client) -> QdrantResponse{HealthInfo}
 
 Get Qdrant server version and title.
 """
-function get_version(conn::QdrantConnection{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, conn, "/")
+function get_version(client::QdrantClient{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, client, "/")
     raw, status, time = _unwrap(resp)
     info = raw isa AbstractDict ?
         HealthInfo(String(get(raw, "title", "qdrant")),
@@ -37,24 +37,24 @@ function get_version(conn::QdrantConnection{HTTPTransport}=get_client())
 end
 
 """
-    get_metrics(conn) -> QdrantResponse{String}
+    get_metrics(client) -> QdrantResponse{String}
 
 Retrieve Prometheus-format metrics (plain text response).
 """
-function get_metrics(conn::QdrantConnection{HTTPTransport}=get_client();
+function get_metrics(client::QdrantClient{HTTPTransport}=get_client();
                      timeout::Optional{Int}=nothing)
-    resp = http_request(HTTP.get, conn, "/metrics"; query=_timeout_query(timeout))
+    resp = http_request(HTTP.get, client, "/metrics"; query=_timeout_query(timeout))
     QdrantResponse(String(resp.body), "", 0.0)  # plain text, no status field
 end
 
 """
-    get_telemetry(conn) -> QdrantResponse{Dict{String,Any}}
+    get_telemetry(client) -> QdrantResponse{Dict{String,Any}}
 
 Retrieve telemetry data.
 """
-function get_telemetry(conn::QdrantConnection{HTTPTransport}=get_client();
+function get_telemetry(client::QdrantClient{HTTPTransport}=get_client();
                        timeout::Optional{Int}=nothing)
-    resp = http_request(HTTP.get, conn, "/telemetry"; query=_timeout_query(timeout))
+    resp = http_request(HTTP.get, client, "/telemetry"; query=_timeout_query(timeout))
     raw, status, time = _unwrap(resp)
     QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
@@ -62,53 +62,53 @@ end
 # ── Kubernetes Health Probes ─────────────────────────────────────────────
 
 """
-    healthz(conn) -> QdrantResponse{String}
+    healthz(client) -> QdrantResponse{String}
 
 Kubernetes health check endpoint (plain text response).
 """
-function healthz(conn::QdrantConnection{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, conn, "/healthz")
+function healthz(client::QdrantClient{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, client, "/healthz")
     QdrantResponse(String(resp.body), "", 0.0)  # plain text, no status field
 end
 
 """
-    livez(conn) -> QdrantResponse{String}
+    livez(client) -> QdrantResponse{String}
 
 Kubernetes liveness probe (plain text response).
 """
-function livez(conn::QdrantConnection{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, conn, "/livez")
+function livez(client::QdrantClient{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, client, "/livez")
     QdrantResponse(String(resp.body), "", 0.0)  # plain text, no status field
 end
 
 """
-    readyz(conn) -> QdrantResponse{String}
+    readyz(client) -> QdrantResponse{String}
 
 Kubernetes readiness probe (plain text response).
 """
-function readyz(conn::QdrantConnection{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, conn, "/readyz")
+function readyz(client::QdrantClient{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, client, "/readyz")
     QdrantResponse(String(resp.body), "", 0.0)  # plain text, no status field
 end
 
 # ── Issues ───────────────────────────────────────────────────────────────
 
 """
-    get_issues(conn) -> QdrantResponse{Dict{String,Any}}
+    get_issues(client) -> QdrantResponse{Dict{String,Any}}
 
 Get performance issues and configuration suggestions.
 """
-function get_issues(conn::QdrantConnection{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, conn, "/issues")
+function get_issues(client::QdrantClient{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, client, "/issues")
     raw, status, time = _unwrap(resp)
     QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
 
 """
-    clear_issues(conn) -> QdrantResponse{Bool}
+    clear_issues(client) -> QdrantResponse{Bool}
 
 Clear all reported issues.
 """
-function clear_issues(conn::QdrantConnection{HTTPTransport}=get_client())
-    parse_bool(http_request(HTTP.delete, conn, "/issues"))
+function clear_issues(client::QdrantClient{HTTPTransport}=get_client())
+    parse_bool(http_request(HTTP.delete, client, "/issues"))
 end

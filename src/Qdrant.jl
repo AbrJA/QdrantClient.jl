@@ -1,5 +1,5 @@
 """
-    QdrantClient
+    Qdrant
 
 A Julian client for the [Qdrant](https://qdrant.tech) vector database.
 
@@ -9,22 +9,22 @@ and the server-side `.time`.
 
 # Quick Start — HTTP (default)
 ```julia
-using QdrantClient
+using Qdrant
 
-conn = QdrantConnection()
-create_collection(conn, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
-upsert_points(conn, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
-resp = query_points(conn, "demo"; query=Float32[1,0,0,0], limit=5)
+client = QdrantClient()
+create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+upsert_points(client, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
+resp = query_points(client, "demo"; query=Float32[1,0,0,0], limit=5)
 resp.result.points   # Vector{ScoredPoint}
 ```
 
 # Quick Start — gRPC
 ```julia
-conn = QdrantConnection(GRPCTransport(host="localhost", port=6334))
+client = QdrantClient(GRPCTransport(host="localhost", port=6334))
 # Same API — transport is selected via dispatch
 ```
 """
-module QdrantClient
+module Qdrant
 
 using HTTP
 using JSON
@@ -85,7 +85,7 @@ base_url(t::HTTPTransport) = "$(t.tls ? "https" : "http")://$(t.host):$(t.port)"
 function transport_headers(t::HTTPTransport)
     headers = Pair{String,String}[
         "Content-Type" => "application/json",
-        "User-Agent"   => "QdrantClient.jl/$CLIENT_VERSION",
+        "User-Agent"   => "Qdrant.jl/$CLIENT_VERSION",
     ]
     t.api_key !== nothing && push!(headers, "api-key" => t.api_key)
     headers
@@ -99,55 +99,55 @@ end
 _timeout_query(timeout::Optional{Int}) = timeout === nothing ? nothing : Dict("timeout" => timeout)
 
 # ============================================================================
-# QdrantConnection{T} — parametric on transport for dispatch
+# QdrantClient{T} — parametric on transport for dispatch
 # ============================================================================
 
 """
-    QdrantConnection{T<:AbstractTransport}
+    QdrantClient{T<:AbstractTransport}
 
 Connection to a Qdrant server.  The type parameter `T` selects the transport,
 enabling zero-cost dispatch to HTTP or gRPC code paths.
 
 # Constructors
 ```julia
-QdrantConnection()                                        # HTTP localhost:6333
-QdrantConnection(host="myhost", port=6333, api_key="k")  # HTTP with options
-QdrantConnection(GRPCTransport(host="h", port=6334))      # gRPC
+QdrantClient()                                        # HTTP localhost:6333
+QdrantClient(host="myhost", port=6333, api_key="k")  # HTTP with options
+QdrantClient(GRPCTransport(host="h", port=6334))      # gRPC
 ```
 """
-struct QdrantConnection{T<:AbstractTransport}
+struct QdrantClient{T<:AbstractTransport}
     transport::T
 end
 
-function QdrantConnection(;
+function QdrantClient(;
     host::String = "localhost",
     port::Int    = 6333,
     api_key::Optional{String} = nothing,
     timeout::Int = 30,
     tls::Bool    = false,
 )
-    QdrantConnection(HTTPTransport(; host, port, api_key, timeout, tls))
+    QdrantClient(HTTPTransport(; host, port, api_key, timeout, tls))
 end
 
-const _GLOBAL_CLIENT = Ref{QdrantConnection}()
+const _GLOBAL_CLIENT = Ref{QdrantClient}()
 
 """
-    set_client!(conn) -> QdrantConnection
+    set_client!(client) -> QdrantClient
 
 Set the global default connection.
 """
-function set_client!(conn::QdrantConnection)
-    _GLOBAL_CLIENT[] = conn
-    conn
+function set_client!(client::QdrantClient)
+    _GLOBAL_CLIENT[] = client
+    client
 end
 
 """
-    get_client() -> QdrantConnection
+    get_client() -> QdrantClient
 
 Return the global default connection, creating one if needed.
 """
 function get_client()
-    isassigned(_GLOBAL_CLIENT) ? _GLOBAL_CLIENT[] : (_GLOBAL_CLIENT[] = QdrantConnection())
+    isassigned(_GLOBAL_CLIENT) ? _GLOBAL_CLIENT[] : (_GLOBAL_CLIENT[] = QdrantClient())
 end
 
 # ============================================================================
@@ -184,13 +184,13 @@ function _parse_error(resp::HTTP.Response)
 end
 
 """
-    http_request(method, conn, path, [body]; query=nothing) -> HTTP.Response
+    http_request(method, client, path, [body]; query=nothing) -> HTTP.Response
 
 Low-level HTTP request with error handling and connection pooling.
 """
-function http_request(method::Function, conn::QdrantConnection{HTTPTransport},
+function http_request(method::Function, client::QdrantClient{HTTPTransport},
                       path::AbstractString, body=nothing; query=nothing)
-    transport = conn.transport
+    transport = client.transport
     url = transport_url(transport, path)
     kw = Dict{Symbol,Any}(
         :pool             => ensure_pool!(transport),
@@ -388,7 +388,7 @@ include("grpc_service.jl")
 # ============================================================================
 
 # Core
-export QdrantConnection, QdrantResponse, set_client!, get_client, QdrantError
+export QdrantClient, QdrantResponse, set_client!, get_client, QdrantError
 
 # Transport
 export AbstractTransport, HTTPTransport, GRPCTransport

@@ -1,16 +1,16 @@
-# QdrantClient.jl
+# Qdrant.jl
 
 A high-performance, idiomatic Julia client for the [Qdrant](https://qdrant.tech/) vector database.
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://AbrJA.github.io/QdrantClient.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://AbrJA.github.io/QdrantClient.jl/dev)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://AbrJA.github.io/Qdrant.jl/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://AbrJA.github.io/Qdrant.jl/dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Features
 
 - **Dual transport** — HTTP/REST and gRPC, selected via Julia's multiple dispatch
 - **Typed responses** — every endpoint returns `QdrantResponse{T}` with `.result`, `.status`, and `.time`
-- **Zero-cost dispatch** — parametric `QdrantConnection{T}` eliminates runtime transport checks
+- **Zero-cost dispatch** — parametric `QdrantClient{T}` eliminates runtime transport checks
 - **Complete API coverage** — collections, points, queries, snapshots, payload indexes, facets, cluster, shards, health probes
 - **Julian design** — keyword constructors, `@enum` distance, `Union` point IDs, `StructUtils` serialization
 
@@ -18,29 +18,29 @@ A high-performance, idiomatic Julia client for the [Qdrant](https://qdrant.tech/
 
 ```julia
 using Pkg
-Pkg.add("QdrantClient")
+Pkg.add("Qdrant")
 ```
 
 ## Quick Start
 
 ```julia
-using QdrantClient
+using Qdrant
 
 # Connect (HTTP, default)
-conn = QdrantConnection()
+client = QdrantClient()
 
 # Create a collection
-create_collection(conn, "demo",
+create_collection(client, "demo",
     CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
 
 # Insert points
-upsert_points(conn, "demo", [
+upsert_points(client, "demo", [
     Point(id=1, vector=Float32[1, 0, 0, 0], payload=Dict("color" => "red")),
     Point(id=2, vector=Float32[0, 1, 0, 0], payload=Dict("color" => "blue")),
 ]; wait=true)
 
 # Query
-resp = query_points(conn, "demo"; query=Float32[1, 0, 0, 0], limit=5, with_payload=true)
+resp = query_points(client, "demo"; query=Float32[1, 0, 0, 0], limit=5, with_payload=true)
 resp.result.points   # Vector{ScoredPoint}
 resp.status           # "ok"
 resp.time             # server-side time in seconds
@@ -50,18 +50,18 @@ resp.time             # server-side time in seconds
 
 ```julia
 # HTTP (default)
-conn = QdrantConnection()
-conn = QdrantConnection(host="qdrant.example.com", port=6333, api_key="secret", tls=true)
+client = QdrantClient()
+client = QdrantClient(host="qdrant.example.com", port=6333, api_key="secret", tls=true)
 
 # gRPC
-conn = QdrantConnection(GRPCTransport(host="localhost", port=6334))
+client = QdrantClient(GRPCTransport(host="localhost", port=6334))
 
 # Global default
-set_client!(conn)
+set_client!(client)
 list_collections()  # uses global client
 ```
 
-The connection type `QdrantConnection{HTTPTransport}` or `QdrantConnection{GRPCTransport}` drives dispatch — the same function names work with both transports.
+The connection type `QdrantClient{HTTPTransport}` or `QdrantClient{GRPCTransport}` drives dispatch — the same function names work with both transports.
 
 ## Response Envelope
 
@@ -76,7 +76,7 @@ end
 ```
 
 ```julia
-resp = count_points(conn, "demo"; exact=true)
+resp = count_points(client, "demo"; exact=true)
 resp.result.count  # Int
 resp.status        # "ok"
 resp.time          # 0.00042
@@ -87,121 +87,121 @@ resp.time          # 0.00042
 ### Collections
 
 ```julia
-list_collections(conn) -> QdrantResponse{Vector{CollectionDescription}}
-create_collection(conn, name, config) -> QdrantResponse{Bool}
-create_collection(conn, name; vectors=VectorParams(...)) -> QdrantResponse{Bool}
-delete_collection(conn, name) -> QdrantResponse{Bool}
-collection_exists(conn, name) -> QdrantResponse{Bool}
-get_collection(conn, name) -> QdrantResponse{Dict{String,Any}}
-update_collection(conn, name, update) -> QdrantResponse{Bool}
+list_collections(client) -> QdrantResponse{Vector{CollectionDescription}}
+create_collection(client, name, config) -> QdrantResponse{Bool}
+create_collection(client, name; vectors=VectorParams(...)) -> QdrantResponse{Bool}
+delete_collection(client, name) -> QdrantResponse{Bool}
+collection_exists(client, name) -> QdrantResponse{Bool}
+get_collection(client, name) -> QdrantResponse{Dict{String,Any}}
+update_collection(client, name, update) -> QdrantResponse{Bool}
 ```
 
 ### Aliases
 
 ```julia
-create_alias(conn, alias, collection) -> QdrantResponse{Bool}
-delete_alias(conn, alias) -> QdrantResponse{Bool}
-rename_alias(conn, old, new) -> QdrantResponse{Bool}
-list_aliases(conn) -> QdrantResponse{Vector{AliasDescription}}
-list_collection_aliases(conn, collection) -> QdrantResponse{Vector{AliasDescription}}
+create_alias(client, alias, collection) -> QdrantResponse{Bool}
+delete_alias(client, alias) -> QdrantResponse{Bool}
+rename_alias(client, old, new) -> QdrantResponse{Bool}
+list_aliases(client) -> QdrantResponse{Vector{AliasDescription}}
+list_collection_aliases(client, collection) -> QdrantResponse{Vector{AliasDescription}}
 ```
 
 ### Points
 
 ```julia
-upsert_points(conn, collection, points; wait=false) -> QdrantResponse{UpdateResult}
-get_points(conn, collection, ids; with_payload, with_vectors) -> QdrantResponse{Vector{Record}}
-get_point(conn, collection, id) -> QdrantResponse{Record}
-delete_points(conn, collection, ids_or_filter; wait=false) -> QdrantResponse{UpdateResult}
-scroll_points(conn, collection; limit, filter, with_payload) -> QdrantResponse{ScrollResult}
-count_points(conn, collection; filter, exact) -> QdrantResponse{CountResult}
-batch_points(conn, collection, operations; wait=false) -> QdrantResponse{Vector{UpdateResult}}
+upsert_points(client, collection, points; wait=false) -> QdrantResponse{UpdateResult}
+get_points(client, collection, ids; with_payload, with_vectors) -> QdrantResponse{Vector{Record}}
+get_point(client, collection, id) -> QdrantResponse{Record}
+delete_points(client, collection, ids_or_filter; wait=false) -> QdrantResponse{UpdateResult}
+scroll_points(client, collection; limit, filter, with_payload) -> QdrantResponse{ScrollResult}
+count_points(client, collection; filter, exact) -> QdrantResponse{CountResult}
+batch_points(client, collection, operations; wait=false) -> QdrantResponse{Vector{UpdateResult}}
 ```
 
 ### Payload Operations
 
 ```julia
-set_payload(conn, collection, payload, ids_or_filter) -> QdrantResponse{UpdateResult}
-overwrite_payload(conn, collection, payload, ids_or_filter) -> QdrantResponse{UpdateResult}
-delete_payload(conn, collection, keys, ids_or_filter) -> QdrantResponse{UpdateResult}
-clear_payload(conn, collection, ids; wait=false) -> QdrantResponse{UpdateResult}
+set_payload(client, collection, payload, ids_or_filter) -> QdrantResponse{UpdateResult}
+overwrite_payload(client, collection, payload, ids_or_filter) -> QdrantResponse{UpdateResult}
+delete_payload(client, collection, keys, ids_or_filter) -> QdrantResponse{UpdateResult}
+clear_payload(client, collection, ids; wait=false) -> QdrantResponse{UpdateResult}
 ```
 
 ### Vectors
 
 ```julia
-update_vectors(conn, collection, points) -> QdrantResponse{UpdateResult}
-delete_vectors(conn, collection, vector_names, ids; wait=false) -> QdrantResponse{UpdateResult}
+update_vectors(client, collection, points) -> QdrantResponse{UpdateResult}
+delete_vectors(client, collection, vector_names, ids; wait=false) -> QdrantResponse{UpdateResult}
 ```
 
 ### Query
 
 ```julia
-query_points(conn, collection, request) -> QdrantResponse{QueryResult}
-query_points(conn, collection; query, limit, kwargs...) -> QdrantResponse{QueryResult}
-query_batch(conn, collection, requests) -> QdrantResponse{Vector{QueryResult}}
-query_groups(conn, collection, request) -> QdrantResponse{GroupsResult}
-facet(conn, collection, field; kwargs...) -> QdrantResponse{FacetResult}
+query_points(client, collection, request) -> QdrantResponse{QueryResult}
+query_points(client, collection; query, limit, kwargs...) -> QdrantResponse{QueryResult}
+query_batch(client, collection, requests) -> QdrantResponse{Vector{QueryResult}}
+query_groups(client, collection, request) -> QdrantResponse{GroupsResult}
+facet(client, collection, field; kwargs...) -> QdrantResponse{FacetResult}
 ```
 
 ### Snapshots
 
 ```julia
-create_snapshot(conn, collection) -> QdrantResponse{SnapshotInfo}
-list_snapshots(conn, collection) -> QdrantResponse{Vector{SnapshotInfo}}
-delete_snapshot(conn, collection, name) -> QdrantResponse{Bool}
-create_full_snapshot(conn) -> QdrantResponse{SnapshotInfo}
-list_full_snapshots(conn) -> QdrantResponse{Vector{SnapshotInfo}}
-delete_full_snapshot(conn, name) -> QdrantResponse{Bool}
-recover_from_snapshot(conn, collection; location, priority) -> QdrantResponse{Bool}
+create_snapshot(client, collection) -> QdrantResponse{SnapshotInfo}
+list_snapshots(client, collection) -> QdrantResponse{Vector{SnapshotInfo}}
+delete_snapshot(client, collection, name) -> QdrantResponse{Bool}
+create_full_snapshot(client) -> QdrantResponse{SnapshotInfo}
+list_full_snapshots(client) -> QdrantResponse{Vector{SnapshotInfo}}
+delete_full_snapshot(client, name) -> QdrantResponse{Bool}
+recover_from_snapshot(client, collection; location, priority) -> QdrantResponse{Bool}
 ```
 
 ### Payload Indexes
 
 ```julia
-create_payload_index(conn, collection, field; field_schema, wait) -> QdrantResponse{UpdateResult}
-delete_payload_index(conn, collection, field; wait) -> QdrantResponse{UpdateResult}
+create_payload_index(client, collection, field; field_schema, wait) -> QdrantResponse{UpdateResult}
+delete_payload_index(client, collection, field; wait) -> QdrantResponse{UpdateResult}
 ```
 
 ### Service
 
 ```julia
-health_check(conn) -> QdrantResponse{HealthInfo}
-get_version(conn) -> QdrantResponse{HealthInfo}
-get_metrics(conn) -> QdrantResponse{String}
-get_telemetry(conn) -> QdrantResponse{Dict{String,Any}}
-healthz(conn) -> QdrantResponse{String}
-livez(conn) -> QdrantResponse{String}
-readyz(conn) -> QdrantResponse{String}
-get_issues(conn) -> QdrantResponse{Dict{String,Any}}
-clear_issues(conn) -> QdrantResponse{Bool}
+health_check(client) -> QdrantResponse{HealthInfo}
+get_version(client) -> QdrantResponse{HealthInfo}
+get_metrics(client) -> QdrantResponse{String}
+get_telemetry(client) -> QdrantResponse{Dict{String,Any}}
+healthz(client) -> QdrantResponse{String}
+livez(client) -> QdrantResponse{String}
+readyz(client) -> QdrantResponse{String}
+get_issues(client) -> QdrantResponse{Dict{String,Any}}
+clear_issues(client) -> QdrantResponse{Bool}
 ```
 
 ### Cluster & Distributed
 
 ```julia
-cluster_status(conn) -> QdrantResponse{Dict{String,Any}}
-cluster_telemetry(conn) -> QdrantResponse{Dict{String,Any}}
-recover_current_peer(conn) -> QdrantResponse{Bool}
-remove_peer(conn, peer_id; force=false) -> QdrantResponse{Bool}
-collection_cluster_info(conn, collection) -> QdrantResponse{Dict{String,Any}}
-update_collection_cluster(conn, collection, operations) -> QdrantResponse{Bool}
+cluster_status(client) -> QdrantResponse{Dict{String,Any}}
+cluster_telemetry(client) -> QdrantResponse{Dict{String,Any}}
+recover_current_peer(client) -> QdrantResponse{Bool}
+remove_peer(client, peer_id; force=false) -> QdrantResponse{Bool}
+collection_cluster_info(client, collection) -> QdrantResponse{Dict{String,Any}}
+update_collection_cluster(client, collection, operations) -> QdrantResponse{Bool}
 ```
 
 ### Shard Keys
 
 ```julia
-list_shard_keys(conn, collection) -> QdrantResponse{Dict{String,Any}}
-create_shard_key(conn, collection, request) -> QdrantResponse{Bool}
-delete_shard_key(conn, collection, request) -> QdrantResponse{Bool}
+list_shard_keys(client, collection) -> QdrantResponse{Dict{String,Any}}
+create_shard_key(client, collection, request) -> QdrantResponse{Bool}
+delete_shard_key(client, collection, request) -> QdrantResponse{Bool}
 ```
 
 ### Shard Snapshots
 
 ```julia
-create_shard_snapshot(conn, collection, shard_id) -> QdrantResponse{SnapshotInfo}
-list_shard_snapshots(conn, collection, shard_id) -> QdrantResponse{Vector{SnapshotInfo}}
-delete_shard_snapshot(conn, collection, shard_id, name) -> QdrantResponse{Bool}
+create_shard_snapshot(client, collection, shard_id) -> QdrantResponse{SnapshotInfo}
+list_shard_snapshots(client, collection, shard_id) -> QdrantResponse{Vector{SnapshotInfo}}
+delete_shard_snapshot(client, collection, shard_id, name) -> QdrantResponse{Bool}
 ```
 
 ## Type Reference
@@ -270,11 +270,11 @@ IsNullCondition(; is_null)
 The gRPC transport supports the same API surface. Pass a `GRPCTransport` to select it:
 
 ```julia
-conn = QdrantConnection(GRPCTransport(host="localhost", port=6334))
+client = QdrantClient(GRPCTransport(host="localhost", port=6334))
 
 # Same functions, dispatched to gRPC
-create_collection(conn, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
-query_points(conn, "demo"; query=Float32[1, 0, 0, 0], limit=5)
+create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
+query_points(client, "demo"; query=Float32[1, 0, 0, 0], limit=5)
 ```
 
 **Known limitation**: Proto3 does not encode the default enum value (0), so `field_schema="keyword"` in `create_payload_index` may not work over gRPC. Use `"integer"`, `"float"`, or `"text"` instead.
@@ -286,15 +286,15 @@ cfg = CollectionConfig(vectors=Dict(
     "image" => VectorParams(size=512, distance=Cosine),
     "text"  => VectorParams(size=768, distance=Dot),
 ))
-create_collection(conn, "multi", cfg)
+create_collection(client, "multi", cfg)
 
 pts = [Point(id=1, vector=Dict(
     "image" => Float32.(randn(512)),
     "text"  => Float32.(randn(768)),
 ))]
-upsert_points(conn, "multi", pts)
+upsert_points(client, "multi", pts)
 
-query_points(conn, "multi"; query=Float32.(randn(512)), using_="image", limit=10)
+query_points(client, "multi"; query=Float32.(randn(512)), using_="image", limit=10)
 ```
 
 ## Filtering
@@ -304,7 +304,7 @@ f = Filter(must=[
     FieldCondition(key="color", match=MatchValue(value="red")),
     FieldCondition(key="price", range=RangeCondition(gte=10.0, lte=100.0)),
 ])
-query_points(conn, "demo"; query=Float32[1, 0, 0, 0], limit=5, filter=f)
+query_points(client, "demo"; query=Float32[1, 0, 0, 0], limit=5, filter=f)
 ```
 
 ## Error Handling
@@ -313,7 +313,7 @@ API errors throw `QdrantError`:
 
 ```julia
 try
-    get_collection(conn, "nonexistent")
+    get_collection(client, "nonexistent")
 catch e::QdrantError
     e.status   # HTTP status code (Int)
     e.message  # error message (String)

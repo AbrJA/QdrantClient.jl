@@ -147,13 +147,13 @@
         @test !haskey(pd, "c")
     end
 
-    @testset "QdrantConnection" begin
-        conn = QdrantConnection()
-        @test conn isa QdrantConnection{HTTPTransport}
-        @test conn.transport.host == "localhost"
-        @test conn.transport.port == 6333
+    @testset "QdrantClient" begin
+        client = QdrantClient()
+        @test client isa QdrantClient{HTTPTransport}
+        @test client.transport.host == "localhost"
+        @test client.transport.port == 6333
 
-        conn2 = QdrantConnection(host="example.com", port=8080, api_key="secret", tls=true)
+        conn2 = QdrantClient(host="example.com", port=8080, api_key="secret", tls=true)
         @test conn2.transport.host == "example.com"
         @test conn2.transport.api_key == "secret"
         @test conn2.transport.tls === true
@@ -161,29 +161,29 @@
 
     @testset "Transport" begin
         t = HTTPTransport(host="myhost", port=9999, tls=true)
-        @test QdrantClient.base_url(t) == "https://myhost:9999"
+        @test Qdrant.base_url(t) == "https://myhost:9999"
 
         t2 = HTTPTransport(host="local", port=6333)
-        @test QdrantClient.transport_url(t2, "/collections") == "http://local:6333/collections"
-        @test QdrantClient.transport_url(t2, "collections") == "http://local:6333/collections"
+        @test Qdrant.transport_url(t2, "/collections") == "http://local:6333/collections"
+        @test Qdrant.transport_url(t2, "collections") == "http://local:6333/collections"
     end
 
     @testset "Headers" begin
         t = HTTPTransport(api_key="secret")
-        hd = Dict(QdrantClient.transport_headers(t))
+        hd = Dict(Qdrant.transport_headers(t))
         @test hd["Content-Type"] == "application/json"
         @test hd["api-key"] == "secret"
 
         t2 = HTTPTransport()
-        hd2 = Dict(QdrantClient.transport_headers(t2))
+        hd2 = Dict(Qdrant.transport_headers(t2))
         @test !haskey(hd2, "api-key")
     end
 
     @testset "Global client" begin
-        c1 = QdrantConnection(host="host1")
+        c1 = QdrantClient(host="host1")
         set_client!(c1)
         @test get_client().transport.host == "host1"
-        set_client!(QdrantConnection())
+        set_client!(QdrantClient())
         @test get_client().transport.host == "localhost"
     end
 

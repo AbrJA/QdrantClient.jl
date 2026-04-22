@@ -6,27 +6,27 @@ using Test
 using UUIDs
 using HTTP
 using JSON
-using QdrantClient
+using Qdrant
 
-const CONN = QdrantConnection()
+const CONN = QdrantClient()
 
 unique_name(prefix="jl") = string(prefix, "_", replace(string(uuid4()), "-" => ""))
 
-function qdrant_available(conn::QdrantConnection=CONN)
+function qdrant_available(client::QdrantClient=CONN)
     try
-        health_check(conn)
+        health_check(client)
         true
     catch
         false
     end
 end
 
-function cleanup_collection(conn::QdrantConnection, name)
-    try; delete_collection(conn, name); catch; end
+function cleanup_collection(client::QdrantClient, name)
+    try; delete_collection(client, name); catch; end
 end
 
-function cleanup_alias(conn::QdrantConnection, alias)
-    try; delete_alias(conn, alias); catch; end
+function cleanup_alias(client::QdrantClient, alias)
+    try; delete_alias(client, alias); catch; end
 end
 
 function fixture_points()

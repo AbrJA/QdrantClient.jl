@@ -2,13 +2,13 @@
 # Collections API — gRPC transport
 # ============================================================================
 
-function list_collections(conn::QdrantConnection{GRPCTransport})
-    resp = grpc_request(conn.transport, Collections_List_Client, qdrant.ListCollectionsRequest())
+function list_collections(client::QdrantClient{GRPCTransport})
+    resp = grpc_request(client.transport, Collections_List_Client, qdrant.ListCollectionsRequest())
     result = CollectionDescription[CollectionDescription(cd.name) for cd in resp.collections]
     QdrantResponse(result, "ok", 0.0)
 end
 
-function create_collection(conn::QdrantConnection{GRPCTransport}, name::AbstractString,
+function create_collection(client::QdrantClient{GRPCTransport}, name::AbstractString,
                            config::CollectionConfig)
     req = qdrant.CreateCollection(
         name,
@@ -29,26 +29,26 @@ function create_collection(conn::QdrantConnection{GRPCTransport}, name::Abstract
         nothing, nothing,
         Dict{String,qdrant.Value}(),
     )
-    resp = grpc_request(conn.transport, Collections_Create_Client, req)
+    resp = grpc_request(client.transport, Collections_Create_Client, req)
     QdrantResponse(resp.result, "ok", 0.0)
 end
 
-function delete_collection(conn::QdrantConnection{GRPCTransport}, name::AbstractString)
+function delete_collection(client::QdrantClient{GRPCTransport}, name::AbstractString)
     req = qdrant.DeleteCollection(name, UInt64(0))
-    resp = grpc_request(conn.transport, Collections_Delete_Client, req)
+    resp = grpc_request(client.transport, Collections_Delete_Client, req)
     QdrantResponse(resp.result, "ok", 0.0)
 end
 
-function collection_exists(conn::QdrantConnection{GRPCTransport}, name::AbstractString)
+function collection_exists(client::QdrantClient{GRPCTransport}, name::AbstractString)
     req = qdrant.CollectionExistsRequest(name)
-    resp = grpc_request(conn.transport, Collections_CollectionExists_Client, req)
+    resp = grpc_request(client.transport, Collections_CollectionExists_Client, req)
     exists = resp.result !== nothing ? resp.result.exists : false
     QdrantResponse(exists, "ok", 0.0)
 end
 
-function get_collection(conn::QdrantConnection{GRPCTransport}, name::AbstractString)
+function get_collection(client::QdrantClient{GRPCTransport}, name::AbstractString)
     req = qdrant.GetCollectionInfoRequest(name)
-    resp = grpc_request(conn.transport, Collections_Get_Client, req)
+    resp = grpc_request(client.transport, Collections_Get_Client, req)
     QdrantResponse(_collection_info_to_dict(resp.result), "ok", 0.0)
 end
 
@@ -75,7 +75,7 @@ function _collection_config_to_dict(config::qdrant.CollectionConfig)
     result
 end
 
-function update_collection(conn::QdrantConnection{GRPCTransport}, name::AbstractString,
+function update_collection(client::QdrantClient{GRPCTransport}, name::AbstractString,
                            config::CollectionUpdate)
     req = qdrant.UpdateCollection(
         name,
@@ -86,47 +86,47 @@ function update_collection(conn::QdrantConnection{GRPCTransport}, name::Abstract
         nothing, nothing, nothing, nothing,
         Dict{String,qdrant.Value}(),
     )
-    resp = grpc_request(conn.transport, Collections_Update_Client, req)
+    resp = grpc_request(client.transport, Collections_Update_Client, req)
     QdrantResponse(resp.result, "ok", 0.0)
 end
 
 # ── Aliases — gRPC ───────────────────────────────────────────────────────
 
-function list_aliases(conn::QdrantConnection{GRPCTransport})
-    resp = grpc_request(conn.transport, Collections_ListAliases_Client, qdrant.ListAliasesRequest())
+function list_aliases(client::QdrantClient{GRPCTransport})
+    resp = grpc_request(client.transport, Collections_ListAliases_Client, qdrant.ListAliasesRequest())
     result = AliasDescription[AliasDescription(a.alias_name, a.collection_name) for a in resp.aliases]
     QdrantResponse(result, "ok", 0.0)
 end
 
-function list_collection_aliases(conn::QdrantConnection{GRPCTransport}, name::AbstractString)
+function list_collection_aliases(client::QdrantClient{GRPCTransport}, name::AbstractString)
     req = qdrant.ListCollectionAliasesRequest(name)
-    resp = grpc_request(conn.transport, Collections_ListCollectionAliases_Client, req)
+    resp = grpc_request(client.transport, Collections_ListCollectionAliases_Client, req)
     result = AliasDescription[AliasDescription(a.alias_name, a.collection_name) for a in resp.aliases]
     QdrantResponse(result, "ok", 0.0)
 end
 
-function create_alias(conn::QdrantConnection{GRPCTransport}, alias::AbstractString,
+function create_alias(client::QdrantClient{GRPCTransport}, alias::AbstractString,
                       collection::AbstractString)
     action = qdrant.AliasOperations(OneOf(:create_alias,
         qdrant.CreateAlias(collection, alias)))
     req = qdrant.ChangeAliases([action], UInt64(0))
-    resp = grpc_request(conn.transport, Collections_UpdateAliases_Client, req)
+    resp = grpc_request(client.transport, Collections_UpdateAliases_Client, req)
     QdrantResponse(resp.result, "ok", 0.0)
 end
 
-function delete_alias(conn::QdrantConnection{GRPCTransport}, alias::AbstractString)
+function delete_alias(client::QdrantClient{GRPCTransport}, alias::AbstractString)
     action = qdrant.AliasOperations(OneOf(:delete_alias,
         qdrant.DeleteAlias(alias)))
     req = qdrant.ChangeAliases([action], UInt64(0))
-    resp = grpc_request(conn.transport, Collections_UpdateAliases_Client, req)
+    resp = grpc_request(client.transport, Collections_UpdateAliases_Client, req)
     QdrantResponse(resp.result, "ok", 0.0)
 end
 
-function rename_alias(conn::QdrantConnection{GRPCTransport}, old::AbstractString,
+function rename_alias(client::QdrantClient{GRPCTransport}, old::AbstractString,
                       new_name::AbstractString)
     action = qdrant.AliasOperations(OneOf(:rename_alias,
         qdrant.RenameAlias(old, new_name)))
     req = qdrant.ChangeAliases([action], UInt64(0))
-    resp = grpc_request(conn.transport, Collections_UpdateAliases_Client, req)
+    resp = grpc_request(client.transport, Collections_UpdateAliases_Client, req)
     QdrantResponse(resp.result, "ok", 0.0)
 end

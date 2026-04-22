@@ -4,7 +4,7 @@
 
 # ── Query Points ─────────────────────────────────────────────────────────
 
-function query_points(conn::QdrantConnection{GRPCTransport}, collection::AbstractString,
+function query_points(client::QdrantClient{GRPCTransport}, collection::AbstractString,
                       req::QueryRequest)
     proto_req = qdrant.QueryPoints(
         collection,
@@ -20,7 +20,7 @@ function query_points(conn::QdrantConnection{GRPCTransport}, collection::Abstrac
         to_proto_with_payload(req.with_payload),
         nothing, nothing, nothing, UInt64(0),
     )
-    resp = grpc_request(conn.transport, Points_Query_Client, proto_req)
+    resp = grpc_request(client.transport, Points_Query_Client, proto_req)
     points = ScoredPoint[_grpc_to_scored(sp) for sp in resp.result]
     QdrantResponse(QueryResult(points), "ok", resp.time)
 end
@@ -42,7 +42,7 @@ end
 
 # ── Query Batch ──────────────────────────────────────────────────────────
 
-function query_batch(conn::QdrantConnection{GRPCTransport}, collection::AbstractString,
+function query_batch(client::QdrantClient{GRPCTransport}, collection::AbstractString,
                      requests::AbstractVector{QueryRequest})
     query_list = qdrant.QueryPoints[]
     for req in requests
@@ -61,7 +61,7 @@ function query_batch(conn::QdrantConnection{GRPCTransport}, collection::Abstract
         ))
     end
     proto_req = qdrant.QueryBatchPoints(collection, query_list, nothing, UInt64(0))
-    resp = grpc_request(conn.transport, Points_QueryBatch_Client, proto_req)
+    resp = grpc_request(client.transport, Points_QueryBatch_Client, proto_req)
     results = QueryResult[QueryResult(ScoredPoint[_grpc_to_scored(sp) for sp in batch.result])
                           for batch in resp.result]
     QdrantResponse(results, "ok", resp.time)
@@ -69,7 +69,7 @@ end
 
 # ── Query Groups ─────────────────────────────────────────────────────────
 
-function query_groups(conn::QdrantConnection{GRPCTransport}, collection::AbstractString,
+function query_groups(client::QdrantClient{GRPCTransport}, collection::AbstractString,
                       req::QueryRequest)
     proto_req = qdrant.QueryPointGroups(
         collection,
@@ -87,7 +87,7 @@ function query_groups(conn::QdrantConnection{GRPCTransport}, collection::Abstrac
         req.group_by !== nothing ? req.group_by : "",
         nothing, nothing, UInt64(0), nothing,
     )
-    resp = grpc_request(conn.transport, Points_QueryGroups_Client, proto_req)
+    resp = grpc_request(client.transport, Points_QueryGroups_Client, proto_req)
     QdrantResponse(_parse_grpc_groups(resp.result), "ok", resp.time)
 end
 

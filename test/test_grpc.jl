@@ -1,8 +1,8 @@
 # ============================================================================
-# gRPC Tests for QdrantClient.jl v1.0
+# gRPC Tests for Qdrant.jl v1.0
 # ============================================================================
 
-using QdrantClient: qdrant, to_proto_point_id, from_proto_point_id,
+using Qdrant: qdrant, to_proto_point_id, from_proto_point_id,
     to_proto_distance, from_proto_distance,
     julia_value_to_proto, proto_value_to_julia,
     to_proto_payload, from_proto_payload,
@@ -16,11 +16,11 @@ using QdrantClient: qdrant, to_proto_point_id, from_proto_point_id,
     to_proto_ordering
 using ProtoBuf: OneOf
 
-const GRPC_CONN = QdrantConnection(GRPCTransport())
-const HTTP_CONN = QdrantConnection()
+const GRPC_CONN = QdrantClient(GRPCTransport())
+const HTTP_CONN = QdrantClient()
 
-function grpc_available(conn::QdrantConnection=GRPC_CONN)
-    try; health_check(conn); true; catch; false; end
+function grpc_available(client::QdrantClient=GRPC_CONN)
+    try; health_check(client); true; catch; false; end
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
