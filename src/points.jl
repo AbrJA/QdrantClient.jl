@@ -22,12 +22,12 @@ wait_query(wait::Bool) = Dict("wait" => wait)
 Insert or update points.
 """
 function upsert_points(c::QdrantConnection, collection::AbstractString,
-                       points::AbstractVector{<:PointStruct};
+                       points::AbstractVector{<:Point};
                        wait::Bool=true, ordering::AbstractString="weak")
     body = Dict{String,Any}("points" => points, "ordering" => ordering)
     execute(HTTP.put, c, points_path(collection), body; query=wait_query(wait))
 end
-upsert_points(collection::AbstractString, points::AbstractVector{<:PointStruct}; kw...) =
+upsert_points(collection::AbstractString, points::AbstractVector{<:Point}; kw...) =
     upsert_points(get_client(), collection, points; kw...)
 
 """

@@ -374,19 +374,19 @@ end
 # ============================================================================
 
 """
-    PointStruct <: AbstractQdrantType
+    Point <: AbstractQdrantType
 
 A point with id, vector(s), and optional payload.
 
 # Examples
 ```julia
-PointStruct(id=1, vector=Float32[0.1, 0.2, 0.3, 0.4])
-PointStruct(id=uuid4(), vector=Float32[0.1, 0.2, 0.3, 0.4], payload=Dict("label" => "cat"))
-PointStruct(id=1, vector=NamedVector(name="image", vector=Float32[1.0, 0.0, 0.0, 0.0]))
-PointStruct(id=1, vector=Dict{String,Vector{Float32}}("image" => Float32[...], "text" => Float32[...]))
+Point(id=1, vector=Float32[0.1, 0.2, 0.3, 0.4])
+Point(id=uuid4(), vector=Float32[0.1, 0.2, 0.3, 0.4], payload=Dict("label" => "cat"))
+Point(id=1, vector=NamedVector(name="image", vector=Float32[1.0, 0.0, 0.0, 0.0]))
+Point(id=1, vector=Dict{String,Vector{Float32}}("image" => Float32[...], "text" => Float32[...]))
 ```
 """
-StructUtils.@kwarg struct PointStruct <: AbstractQdrantType
+StructUtils.@kwarg struct Point <: AbstractQdrantType
     id::PointId
     vector::Union{Vector{Float32}, Vector{Float64}, NamedVector, Dict{String,Vector{Float32}}, Dict{String,Vector{Float64}}}
     payload::Optional{Dict{String,Any}} = nothing

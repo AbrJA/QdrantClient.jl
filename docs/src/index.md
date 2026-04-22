@@ -1,10 +1,6 @@
-# QdrantClient.jl Documentation
+# QdrantClient.jl
 
-A high-performance, production-ready Julia client for the Qdrant vector database.
-
-```@autodocs
-Modules = [QdrantClient]
-```
+A high-performance, idiomatic Julia client for the [Qdrant](https://qdrant.tech/) vector database.
 
 ## Installation
 
@@ -12,64 +8,312 @@ Modules = [QdrantClient]
 ] add QdrantClient
 ```
 
+Requires Julia 1.12+.
+
+---
+
 ## Quick Start
 
 ```julia
 using QdrantClient
 
-# Create a client
-client = Client(host="http://localhost", port=6333)
-
-# Check server health
-health_check(client)
+client = QdrantConnection()   # localhost:6333
+# or
+client = QdrantConnection(host="qdrant.example.com", port=6333,
+                          api_key="secret", tls=true)
+# or set a global default
+set_client!(QdrantConnection())
 
 # Create a collection
-create_collection(
-    client,
-    "my_vectors";
-    vectors=VectorParams(size=128, distance="Cosine")
-)
+create_collection(client, "demo",
+    CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
 
-# Insert points
-points = [
-    PointStruct(id=1, vector=rand(Float32, 128), payload=Dict("label" => "example1")),
-    PointStruct(id=2, vector=rand(Float32, 128), payload=Dict("label" => "example2"))
-]
-upsert_points(client, "my_vectors", points)
+# Upsert points
+upsert_points(client, "demo", [
+    Point(id=1, vector=Float32[1, 0, 0, 0], payload=Dict("color" => "red")),
+    Point(id=2, vector=Float32[0, 1, 0, 0], payload=Dict("color" => "blue")),
+    Point(id=3, vector=Float32[0, 0, 1, 0], payload=Dict("color" => "green")),
+]; wait=true)
 
 # Search
-results = search_points(
-    client,
-    "my_vectors",
-    SearchRequest(vector=rand(Float32, 128), limit=5)
-)
+hits = search_points(client, "demo",
+    SearchRequest(vector=Float32[1, 0, 0, 0], limit=2, with_payload=true))
 
-# Get recommendations
-recommendations = recommend_points(
-    client,
-    "my_vectors",
-    RecommendRequest(positive=[1], limit=5)
-)
+# Universal query
+results = query_points(client, "demo",
+    QueryRequest(query=Float32[1, 0, 0, 0], limit=2))
+
+# Cleanup
+delete_collection(client, "demo")
 ```
+
+---
+
+## Connection
+
+```@docs
+QdrantConnection
+HTTPTransport
+AbstractTransport
+set_client!
+get_client
+```
+
+---
+
+## Errors
+
+```@docs
+QdrantError
+```
+
+---
+
+## Collections
+
+```@docs
+list_collections
+create_collection
+get_collection
+collection_exists
+update_collection
+delete_collection
+```
+
+### Aliases
+
+```@docs
+list_aliases
+list_collection_aliases
+create_alias
+rename_alias
+delete_alias
+```
+
+---
+
+## Points
+
+```@docs
+upsert_points
+get_points
+delete_points
+```
+
+### Payload
+
+```@docs
+set_payload
+delete_payload
+clear_payload
+```
+
+### Vectors
+
+```@docs
+update_vectors
+delete_vectors
+```
+
+### Scroll & Count
+
+```@docs
+scroll_points
+count_points
+```
+
+### Batch
+
+```@docs
+batch_points
+```
+
+### Payload Index
+
+```@docs
+create_payload_index
+delete_payload_index
+```
+
+---
+
+## Search
+
+```@docs
+search_points
+search_batch
+search_groups
+```
+
+---
+
+## Recommendations
+
+```@docs
+recommend_points
+recommend_batch
+recommend_groups
+```
+
+---
+
+## Query (Universal API)
+
+```@docs
+query_points
+query_batch
+query_groups
+```
+
+---
+
+## Discovery
+
+```@docs
+discover_points
+discover_batch
+```
+
+---
+
+## Snapshots
+
+```@docs
+create_snapshot
+list_snapshots
+delete_snapshot
+```
+
+---
+
+## Cluster & Service
+
+```@docs
+cluster_status
+health_check
+get_metrics
+get_telemetry
+```
+
+---
+
+## Types
+
+### Core
+
+```@docs
+Optional
+PointId
+AbstractQdrantType
+AbstractConfig
+AbstractRequest
+AbstractCondition
+```
+
+### Distance
+
+```@docs
+Distance
+```
+
+### Collection Configuration
+
+```@docs
+CollectionConfig
+CollectionUpdate
+CollectionParamsDiff
+VectorParams
+SparseVectorParams
+HnswConfig
+WalConfig
+OptimizersConfig
+```
+
+### Quantization
+
+```@docs
+ScalarQuantization
+ScalarQuantizationConfig
+ProductQuantization
+ProductQuantizationConfig
+BinaryQuantization
+BinaryQuantizationConfig
+QuantizationSearchParams
+```
+
+### Points
+
+```@docs
+Point
+NamedVector
+LookupLocation
+```
+
+### Filters
+
+```@docs
+Filter
+FieldCondition
+MatchValue
+MatchAny
+MatchText
+RangeCondition
+HasIdCondition
+IsEmptyCondition
+IsNullCondition
+```
+
+### Requests
+
+```@docs
+SearchRequest
+SearchParams
+RecommendRequest
+QueryRequest
+DiscoverRequest
+TextIndexParams
+```
+
+---
+
+## Serialization
+
+```@docs
+serialize_body
+```
+
+---
 
 ## Architecture
 
-QdrantClient.jl follows these design principles:
+QdrantClient.jl is organized around three principles:
 
-1. **Type Safety**: All types defined with StructUtils for zero-cost JSON mapping
-2. **Error Handling**: All HTTP exceptions wrapped in QdrantError
-3. **Multiple Dispatch**: Core operations support explicit-client and default-client methods, plus keyword-based convenience constructors
-4. **Connection Pooling**: HTTP.jl connection pooling for performance
-5. **Complete Coverage**: All Qdrant API endpoints implemented
+**Flat, discoverable API.** Every operation is a top-level function — `search_points`,
+`upsert_points`, `create_collection`. Functions are grouped by noun, not verb, so
+`<TAB>` completion after `search_` shows everything related to search.
 
-## Performance
+**Explicit client or global default.** Every function accepts an optional leading
+`QdrantConnection` argument. When omitted the global default (set via `set_client!`)
+is used. This means you can write scripts with a single `set_client!` call and never
+pass the client again, or pass it explicitly in multi-tenant code.
 
-- Vector operations use Float32 for efficiency
-- Batch operations for high throughput
-- Connection pooling per client
-- Minimal allocations with StructUtils
+**Zero-cost JSON mapping.** Structs are annotated with `StructUtils.@kwarg` and
+serialized by `JSON.json(x; omit_null=true, omit_empty=true)`. `nothing` fields and
+empty collections are stripped automatically, so the wire format stays clean without
+manual `to_dict` conversion.
 
-## Development
+### Module layout
 
-See [CLAUDE.md](https://github.com/AbrJA/QdrantClient.jl/blob/master/CLAUDE.md) for development guidelines.
+| File | Contents |
+|------|----------|
+| `src/QdrantClient.jl` | Transport, connection, serialization, exports |
+| `src/types.jl` | All struct definitions |
+| `src/error.jl` | `QdrantError` |
+| `src/collections.jl` | Collections & aliases API |
+| `src/points.jl` | Points, payload, vectors, scroll, count, index |
+| `src/search.jl` | Search, recommend, query |
+| `src/discovery.jl` | Discovery |
+| `src/snapshots.jl` | Snapshots |
+| `src/distributed.jl` | Cluster status |
+| `src/service.jl` | Health, metrics, telemetry |
 

@@ -28,11 +28,11 @@ end
 
 function fixture_points()
     [
-        PointStruct(id=1, vector=Float32[1.0, 0.0, 0.0, 0.0],
+        Point(id=1, vector=Float32[1.0, 0.0, 0.0, 0.0],
                     payload=Dict{String,Any}("group" => "a", "n" => 1)),
-        PointStruct(id=2, vector=Float32[0.9, 0.1, 0.0, 0.0],
+        Point(id=2, vector=Float32[0.9, 0.1, 0.0, 0.0],
                     payload=Dict{String,Any}("group" => "a", "n" => 2)),
-        PointStruct(id=3, vector=Float32[0.0, 1.0, 0.0, 0.0],
+        Point(id=3, vector=Float32[0.0, 1.0, 0.0, 0.0],
                     payload=Dict{String,Any}("group" => "b", "n" => 3)),
     ]
 end
@@ -75,7 +75,7 @@ end
         @test IsEmptyCondition <: AbstractCondition
         @test IsNullCondition <: AbstractCondition
 
-        @test PointStruct <: AbstractQdrantType
+        @test Point <: AbstractQdrantType
         @test NamedVector <: AbstractQdrantType
     end
 
@@ -141,8 +141,8 @@ end
             @test parsed["optimizers_config"]["indexing_threshold"] == 10000
         end
 
-        @testset "PointStruct with Int id" begin
-            pt = PointStruct(id=1, vector=Float32[1.0, 2.0, 3.0])
+        @testset "Point with Int id" begin
+            pt = Point(id=1, vector=Float32[1.0, 2.0, 3.0])
             j = JSON.json(pt; omit_null=true)
             parsed = JSON.parse(j)
             @test parsed["id"] == 1
@@ -150,9 +150,9 @@ end
             @test !haskey(parsed, "payload")
         end
 
-        @testset "PointStruct with UUID id" begin
+        @testset "Point with UUID id" begin
             u = uuid4()
-            pt = PointStruct(id=u, vector=Float32[0.1, 0.2],
+            pt = Point(id=u, vector=Float32[0.1, 0.2],
                              payload=Dict{String,Any}("color" => "red"))
             j = JSON.json(pt; omit_null=true)
             parsed = JSON.parse(j)
@@ -305,7 +305,7 @@ end
         @test !haskey(pd, "c")
     end
 
-    # ── QdrantConnection / Client ───────────────────────────────────────
+    # ── QdrantConnection / QdrantConnection ───────────────────────────────────────
     @testset "QdrantConnection" begin
         c = QdrantConnection()
         @test c.transport isa HTTPTransport
@@ -320,8 +320,8 @@ end
         @test c2.transport.api_key == "secret"
         @test c2.transport.tls === true
 
-        # Client alias
-        c3 = Client(host="test.com", port=1234)
+        # QdrantConnection alias
+        c3 = QdrantConnection(host="test.com", port=1234)
         @test c3 isa QdrantConnection
         @test c3.transport.host == "test.com"
     end
@@ -353,8 +353,8 @@ end
         @test !haskey(hd2, "api-key")
     end
 
-    # ── Global Client ───────────────────────────────────────────────────
-    @testset "Global Client" begin
+    # ── Global QdrantConnection ───────────────────────────────────────────────────
+    @testset "Global QdrantConnection" begin
         c1 = QdrantConnection(host="host1")
         set_client!(c1)
         @test get_client().transport.host == "host1"
@@ -543,9 +543,9 @@ end
                 u1 = uuid4()
                 u2 = uuid4()
                 pts = [
-                    PointStruct(id=u1, vector=Float32[1.0, 0.0, 0.0, 0.0],
+                    Point(id=u1, vector=Float32[1.0, 0.0, 0.0, 0.0],
                                 payload=Dict{String,Any}("label" => "first")),
-                    PointStruct(id=u2, vector=Float32[0.0, 1.0, 0.0, 0.0],
+                    Point(id=u2, vector=Float32[0.0, 1.0, 0.0, 0.0],
                                 payload=Dict{String,Any}("label" => "second")),
                 ]
                 res = upsert_points(CONN, coll, pts; wait=true)
@@ -781,9 +781,9 @@ end
                     CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
 
                 pts = [
-                    PointStruct(id=1, vector=Float32[1, 0, 0, 0],
+                    Point(id=1, vector=Float32[1, 0, 0, 0],
                         payload=Dict{String,Any}("text" => "hello world")),
-                    PointStruct(id=2, vector=Float32[0, 1, 0, 0],
+                    Point(id=2, vector=Float32[0, 1, 0, 0],
                         payload=Dict{String,Any}("text" => "goodbye world")),
                 ]
                 upsert_points(CONN, coll, pts; wait=true)
@@ -810,13 +810,13 @@ end
                 create_collection(CONN, coll, cfg)
 
                 pts = [
-                    PointStruct(id=1,
+                    Point(id=1,
                         vector=Dict{String,Vector{Float32}}(
                             "image" => Float32[1, 0, 0, 0],
                             "text" => Float32[0, 1, 0, 0],
                         ),
                         payload=Dict{String,Any}("label" => "first")),
-                    PointStruct(id=2,
+                    Point(id=2,
                         vector=Dict{String,Vector{Float32}}(
                             "image" => Float32[0, 1, 0, 0],
                             "text" => Float32[1, 0, 0, 0],
@@ -856,8 +856,8 @@ end
                 create_collection(CONN, coll, cfg)
 
                 pts = [
-                    PointStruct(id=1, vector=Dict{String,Vector{Float32}}("dense" => Float32[1, 0, 0, 0])),
-                    PointStruct(id=2, vector=Dict{String,Vector{Float32}}("dense" => Float32[0, 1, 0, 0])),
+                    Point(id=1, vector=Dict{String,Vector{Float32}}("dense" => Float32[1, 0, 0, 0])),
+                    Point(id=2, vector=Dict{String,Vector{Float32}}("dense" => Float32[0, 1, 0, 0])),
                 ]
                 upsert_points(CONN, coll, pts; wait=true)
 
@@ -969,7 +969,7 @@ end
                 CollectionConfig(vectors=VectorParams(size=128, distance=Dot)))
 
             n_points = 100
-            pts = [PointStruct(id=i, vector=Float32.(randn(128)),
+            pts = [Point(id=i, vector=Float32.(randn(128)),
                     payload=Dict{String,Any}("idx" => i))
                    for i in 1:n_points]
 

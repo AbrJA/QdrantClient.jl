@@ -12,7 +12,7 @@ using QdrantClient
 
 client = QdrantConnection()
 create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
-upsert_points(client, "demo", [PointStruct(id=1, vector=Float32[1,0,0,0])])
+upsert_points(client, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
 query_points(client, "demo", QueryRequest(query=Float32[1,0,0,0], limit=5))
 ```
 """
@@ -119,9 +119,6 @@ function QdrantConnection(;
 )
     QdrantConnection(HTTPTransport(; host, port, api_key, timeout, tls))
 end
-
-# Backward compat alias
-const Client = QdrantConnection
 
 const _GLOBAL_CLIENT = Ref{QdrantConnection}()
 
@@ -238,7 +235,7 @@ include("service.jl")
 # ============================================================================
 
 # Core
-export QdrantConnection, Client, set_client!, get_client, QdrantError
+export QdrantConnection, QdrantConnection, set_client!, get_client, QdrantError
 
 # Transport
 export AbstractTransport, HTTPTransport
@@ -262,7 +259,7 @@ export BinaryQuantization, BinaryQuantizationConfig
 export QuantizationConfig, LookupLocation
 
 # Point types
-export PointStruct, NamedVector
+export Point, NamedVector
 
 # Conditions
 export Filter, FieldCondition, MatchValue, MatchAny, MatchText,
