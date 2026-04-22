@@ -1,13 +1,13 @@
 # ============================================================================
-# gRPC Service API — dispatch on GRPCTransport
+# Service API — gRPC transport
 # ============================================================================
 
-function health_check(c::QdrantConnection, ::Val{:grpc})
-    transport = c.transport::GRPCTransport
+function health_check(conn::QdrantConnection{GRPCTransport})
+    t = conn.transport
     try
-        resp = grpc_request(transport, Qdrant_HealthCheck_Client, qdrant.HealthCheckRequest())
-        HealthResponse(resp.title, resp.version)
+        resp = grpc_request(t, Qdrant_HealthCheck_Client, qdrant.HealthCheckRequest())
+        QdrantResponse(HealthInfo(resp.title, resp.version), "ok", 0.0)
     catch
-        HealthResponse("qdrant", "unavailable")
+        QdrantResponse(HealthInfo("qdrant", "unavailable"), "error", 0.0)
     end
 end

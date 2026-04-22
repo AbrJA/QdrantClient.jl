@@ -1,37 +1,29 @@
 # ============================================================================
-# Snapshots API — collection, full storage
+# Snapshots API — HTTP transport
 # ============================================================================
 
 """
-    create_snapshot(client, collection) -> SnapshotInfo
-
-Create a snapshot of a collection.
+    create_snapshot(conn, collection) -> QdrantResponse{SnapshotInfo}
 """
-function create_snapshot(c::QdrantConnection, collection::AbstractString)
-    is_grpc(c) && return create_snapshot(c, collection, Val(:grpc))
-    parse_snapshot(request(HTTP.post, c, "/collections/$collection/snapshots"))
+function create_snapshot(conn::QdrantConnection{HTTPTransport}, collection::AbstractString)
+    parse_snapshot(http_request(HTTP.post, conn, "/collections/$collection/snapshots"))
 end
 create_snapshot(collection::AbstractString) = create_snapshot(get_client(), collection)
 
 """
-    list_snapshots(client, collection) -> Vector{SnapshotInfo}
-
-List all snapshots for a collection.
+    list_snapshots(conn, collection) -> QdrantResponse{Vector{SnapshotInfo}}
 """
-function list_snapshots(c::QdrantConnection, collection::AbstractString)
-    is_grpc(c) && return list_snapshots(c, collection, Val(:grpc))
-    parse_snapshot_list(request(HTTP.get, c, "/collections/$collection/snapshots"))
+function list_snapshots(conn::QdrantConnection{HTTPTransport}, collection::AbstractString)
+    parse_snapshot_list(http_request(HTTP.get, conn, "/collections/$collection/snapshots"))
 end
 list_snapshots(collection::AbstractString) = list_snapshots(get_client(), collection)
 
 """
-    delete_snapshot(client, collection, snapshot_name) -> Bool
-
-Delete a snapshot.
+    delete_snapshot(conn, collection, snapshot_name) -> QdrantResponse{Bool}
 """
-function delete_snapshot(c::QdrantConnection, collection::AbstractString, name::AbstractString)
-    is_grpc(c) && return delete_snapshot(c, collection, name, Val(:grpc))
-    parse_bool(request(HTTP.delete, c, "/collections/$collection/snapshots/$name"))
+function delete_snapshot(conn::QdrantConnection{HTTPTransport}, collection::AbstractString,
+                         name::AbstractString)
+    parse_bool(http_request(HTTP.delete, conn, "/collections/$collection/snapshots/$name"))
 end
 delete_snapshot(collection::AbstractString, name::AbstractString) =
     delete_snapshot(get_client(), collection, name)
@@ -39,29 +31,23 @@ delete_snapshot(collection::AbstractString, name::AbstractString) =
 # ── Full Storage Snapshots ───────────────────────────────────────────────
 
 """
-    create_full_snapshot(client) -> SnapshotInfo
-
-Create a snapshot of the entire Qdrant storage.
+    create_full_snapshot(conn) -> QdrantResponse{SnapshotInfo}
 """
-function create_full_snapshot(c::QdrantConnection=get_client())
-    parse_snapshot(request(HTTP.post, c, "/snapshots"))
+function create_full_snapshot(conn::QdrantConnection{HTTPTransport}=get_client())
+    parse_snapshot(http_request(HTTP.post, conn, "/snapshots"))
 end
 
 """
-    list_full_snapshots(client) -> Vector{SnapshotInfo}
-
-List all full storage snapshots.
+    list_full_snapshots(conn) -> QdrantResponse{Vector{SnapshotInfo}}
 """
-function list_full_snapshots(c::QdrantConnection=get_client())
-    parse_snapshot_list(request(HTTP.get, c, "/snapshots"))
+function list_full_snapshots(conn::QdrantConnection{HTTPTransport}=get_client())
+    parse_snapshot_list(http_request(HTTP.get, conn, "/snapshots"))
 end
 
 """
-    delete_full_snapshot(client, snapshot_name) -> Bool
-
-Delete a full storage snapshot.
+    delete_full_snapshot(conn, snapshot_name) -> QdrantResponse{Bool}
 """
-function delete_full_snapshot(c::QdrantConnection, name::AbstractString)
-    parse_bool(request(HTTP.delete, c, "/snapshots/$name"))
+function delete_full_snapshot(conn::QdrantConnection{HTTPTransport}, name::AbstractString)
+    parse_bool(http_request(HTTP.delete, conn, "/snapshots/$name"))
 end
 delete_full_snapshot(name::AbstractString) = delete_full_snapshot(get_client(), name)

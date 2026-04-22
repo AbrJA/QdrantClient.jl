@@ -1,29 +1,31 @@
 # ============================================================================
-# gRPC Snapshots API — dispatch on GRPCTransport
+# Snapshots API — gRPC transport
 # ============================================================================
 
-function create_snapshot(c::QdrantConnection, collection::AbstractString, ::Val{:grpc})
-    transport = c.transport::GRPCTransport
+function create_snapshot(conn::QdrantConnection{GRPCTransport}, collection::AbstractString)
+    t = conn.transport
     req = qdrant.CreateSnapshotRequest(collection)
-    resp = grpc_request(transport, Snapshots_Create_Client, req)
+    resp = grpc_request(t, Snapshots_Create_Client, req)
     sd = resp.snapshot_description
-    sd === nothing && return SnapshotInfo("", nothing, 0, nothing)
-    SnapshotInfo(sd.name, nothing, Int(sd.size), isempty(sd.checksum) ? nothing : sd.checksum)
+    info = sd === nothing ? SnapshotInfo("", nothing, 0, nothing) :
+        SnapshotInfo(sd.name, nothing, Int(sd.size), isempty(sd.checksum) ? nothing : sd.checksum)
+    QdrantResponse(info, "ok", 0.0)
 end
 
-function list_snapshots(c::QdrantConnection, collection::AbstractString, ::Val{:grpc})
-    transport = c.transport::GRPCTransport
+function list_snapshots(conn::QdrantConnection{GRPCTransport}, collection::AbstractString)
+    t = conn.transport
     req = qdrant.ListSnapshotsRequest(collection)
-    resp = grpc_request(transport, Snapshots_List_Client, req)
-    SnapshotInfo[SnapshotInfo(sd.name, nothing, Int(sd.size),
-                              isempty(sd.checksum) ? nothing : sd.checksum)
-                 for sd in resp.snapshot_descriptions]
+    resp = grpc_request(t, Snapshots_List_Client, req)
+    result = SnapshotInfo[SnapshotInfo(sd.name, nothing, Int(sd.size),
+                                       isempty(sd.checksum) ? nothing : sd.checksum)
+                          for sd in resp.snapshot_descriptions]
+    QdrantResponse(result, "ok", 0.0)
 end
 
-function delete_snapshot(c::QdrantConnection, collection::AbstractString,
-                         name::AbstractString, ::Val{:grpc})
-    transport = c.transport::GRPCTransport
+function delete_snapshot(conn::QdrantConnection{GRPCTransport}, collection::AbstractString,
+                         name::AbstractString)
+    t = conn.transport
     req = qdrant.DeleteSnapshotRequest(collection, name)
-    grpc_request(transport, Snapshots_Delete_Client, req)
-    true
+    grpc_request(t, Snapshots_Delete_Client, req)
+    QdrantResponse(true, "ok", 0.0)
 end

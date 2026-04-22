@@ -1,58 +1,58 @@
 # ============================================================================
-# Service API (Health, Metrics, Telemetry, Version)
+# Service API — HTTP transport
 # ============================================================================
 
 """
-    health_check(client) -> HealthResponse
+    health_check(conn) -> QdrantResponse{HealthInfo}
 
-Check server health. Returns a `HealthResponse` with title and version.
+Check server health.
 """
-function health_check(c::QdrantConnection=get_client())
-    is_grpc(c) && return health_check(c, Val(:grpc))
+function health_check(conn::QdrantConnection{HTTPTransport}=get_client())
     try
-        resp = request(HTTP.get, c, "/")
-        r = parse_response(resp)
-        r isa AbstractDict || return HealthResponse("qdrant", "unknown")
-        HealthResponse(
-            get(r, "title", "qdrant")::String,
-            get(r, "version", "unknown")::String,
-        )
+        resp = http_request(HTTP.get, conn, "/")
+        raw, status, time = _unwrap(resp)
+        info = raw isa AbstractDict ?
+            HealthInfo(String(get(raw, "title", "qdrant")),
+                       String(get(raw, "version", "unknown"))) :
+            HealthInfo("qdrant", "unknown")
+        QdrantResponse(info, status, time)
     catch
-        HealthResponse("qdrant", "unavailable")
+        QdrantResponse(HealthInfo("qdrant", "unavailable"), "error", 0.0)
     end
 end
 
 """
-    get_version(client) -> HealthResponse
+    get_version(conn) -> QdrantResponse{HealthInfo}
 
 Get Qdrant server version and title.
 """
-function get_version(c::QdrantConnection=get_client())
-    resp = request(HTTP.get, c, "/")
-    r = parse_response(resp)
-    r isa AbstractDict || return HealthResponse("qdrant", "unknown")
-    HealthResponse(
-        get(r, "title", "qdrant")::String,
-        get(r, "version", "unknown")::String,
-    )
+function get_version(conn::QdrantConnection{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, conn, "/")
+    raw, status, time = _unwrap(resp)
+    info = raw isa AbstractDict ?
+        HealthInfo(String(get(raw, "title", "qdrant")),
+                   String(get(raw, "version", "unknown"))) :
+        HealthInfo("qdrant", "unknown")
+    QdrantResponse(info, status, time)
 end
 
 """
-    get_metrics(client) -> String
+    get_metrics(conn) -> QdrantResponse{String}
 
-Retrieve Prometheus-format metrics from the server.
+Retrieve Prometheus-format metrics.
 """
-function get_metrics(c::QdrantConnection=get_client())
-    resp = request(HTTP.get, c, "/metrics")
-    String(resp.body)
+function get_metrics(conn::QdrantConnection{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, conn, "/metrics")
+    QdrantResponse(String(resp.body), "ok", 0.0)
 end
 
 """
-    get_telemetry(client) -> Dict{String,Any}
+    get_telemetry(conn) -> QdrantResponse{Dict{String,Any}}
 
-Retrieve telemetry data from the server.
+Retrieve telemetry data.
 """
-function get_telemetry(c::QdrantConnection=get_client())
-    resp = request(HTTP.get, c, "/telemetry")
-    parse_response(resp)
+function get_telemetry(conn::QdrantConnection{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, conn, "/telemetry")
+    raw, status, time = _unwrap(resp)
+    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end

@@ -1,176 +1,190 @@
 # ============================================================================
-# Collections API
+# Collections API — HTTP transport
 # ============================================================================
 
-collection_path(name::AbstractString) = "/collections/$name"
+_collection_path(name::AbstractString) = "/collections/$name"
+
+# ── List ─────────────────────────────────────────────────────────────────
 
 """
-    list_collections(client) -> Vector{CollectionDescription}
+    list_collections(conn) -> QdrantResponse{Vector{CollectionDescription}}
 
-List all collections.
+List all collections on the server.
 """
-function list_collections(c::QdrantConnection)
-    is_grpc(c) && return list_collections(c, Val(:grpc))
-    resp = request(HTTP.get, c, "/collections")
-    r = parse_response(resp)
-    r isa AbstractDict || return CollectionDescription[]
-    colls = get(r, "collections", Any[])
-    CollectionDescription[CollectionDescription(c_["name"]) for c_ in colls]
+function list_collections(conn::QdrantConnection{HTTPTransport})
+    resp = http_request(HTTP.get, conn, "/collections")
+    raw, status, time = _unwrap(resp)
+    colls = raw isa AbstractDict ? get(raw, "collections", Any[]) : Any[]
+    result = CollectionDescription[CollectionDescription(c["name"]) for c in colls]
+    QdrantResponse(result, status, time)
 end
 list_collections() = list_collections(get_client())
 
+# ── Create ───────────────────────────────────────────────────────────────
+
 """
-    create_collection(client, name, config::CollectionConfig) -> Bool
-    create_collection(client, name; vectors, kwargs...) -> Bool
+    create_collection(conn, name, config) -> QdrantResponse{Bool}
+    create_collection(conn, name; vectors, kwargs...) -> QdrantResponse{Bool}
 
 Create a new collection.
 
 # Examples
 ```julia
-create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
-create_collection(client, "demo"; vectors=VectorParams(size=4, distance=Dot))
+create_collection(conn, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+create_collection(conn, "demo"; vectors=VectorParams(size=4, distance=Dot))
 ```
 """
-function create_collection(c::QdrantConnection, name::AbstractString, config::CollectionConfig)
-    is_grpc(c) && return create_collection(c, name, config, Val(:grpc))
-    parse_bool(request(HTTP.put, c, collection_path(name), config))
+function create_collection(conn::QdrantConnection{HTTPTransport}, name::AbstractString,
+                           config::CollectionConfig)
+    parse_bool(http_request(HTTP.put, conn, _collection_path(name), config))
 end
 create_collection(name::AbstractString, config::CollectionConfig) =
     create_collection(get_client(), name, config)
-create_collection(c::QdrantConnection, name::AbstractString; kwargs...) =
-    create_collection(c, name, CollectionConfig(; kwargs...))
+create_collection(conn::QdrantConnection, name::AbstractString; kwargs...) =
+    create_collection(conn, name, CollectionConfig(; kwargs...))
 create_collection(name::AbstractString; kwargs...) =
     create_collection(get_client(), name; kwargs...)
 
+# ── Delete ───────────────────────────────────────────────────────────────
+
 """
-    delete_collection(client, name) -> Bool
+    delete_collection(conn, name) -> QdrantResponse{Bool}
 
 Delete a collection.
 """
-function delete_collection(c::QdrantConnection, name::AbstractString)
-    is_grpc(c) && return delete_collection(c, name, Val(:grpc))
-    parse_bool(request(HTTP.delete, c, collection_path(name)))
+function delete_collection(conn::QdrantConnection{HTTPTransport}, name::AbstractString)
+    parse_bool(http_request(HTTP.delete, conn, _collection_path(name)))
 end
 delete_collection(name::AbstractString) = delete_collection(get_client(), name)
 
+# ── Exists ───────────────────────────────────────────────────────────────
+
 """
-    collection_exists(client, name) -> Bool
+    collection_exists(conn, name) -> QdrantResponse{Bool}
 
 Check if a collection exists.
 """
-function collection_exists(c::QdrantConnection, name::AbstractString)
-    is_grpc(c) && return collection_exists(c, name, Val(:grpc))
-    resp = request(HTTP.get, c, collection_path(name) * "/exists")
-    r = parse_response(resp)
-    r isa AbstractDict && get(r, "exists", false) === true
+function collection_exists(conn::QdrantConnection{HTTPTransport}, name::AbstractString)
+    resp = http_request(HTTP.get, conn, _collection_path(name) * "/exists")
+    raw, status, time = _unwrap(resp)
+    exists = raw isa AbstractDict && get(raw, "exists", false) === true
+    QdrantResponse(exists, status, time)
 end
 collection_exists(name::AbstractString) = collection_exists(get_client(), name)
 
-"""
-    get_collection(client, name) -> Dict{String,Any}
+# ── Get Info ─────────────────────────────────────────────────────────────
 
-Get detailed collection information including status, config, and statistics.
 """
-function get_collection(c::QdrantConnection, name::AbstractString)
-    is_grpc(c) && return get_collection(c, name, Val(:grpc))
-    resp = request(HTTP.get, c, collection_path(name))
-    parse_response(resp)
+    get_collection(conn, name) -> QdrantResponse{Dict{String,Any}}
+
+Get detailed collection information.
+"""
+function get_collection(conn::QdrantConnection{HTTPTransport}, name::AbstractString)
+    resp = http_request(HTTP.get, conn, _collection_path(name))
+    raw, status, time = _unwrap(resp)
+    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
 get_collection(name::AbstractString) = get_collection(get_client(), name)
 
+# ── Update ───────────────────────────────────────────────────────────────
+
 """
-    update_collection(client, name, config::CollectionUpdate) -> Bool
-    update_collection(client, name; kwargs...) -> Bool
+    update_collection(conn, name, config) -> QdrantResponse{Bool}
+    update_collection(conn, name; kwargs...) -> QdrantResponse{Bool}
 
 Update collection parameters.
 """
-function update_collection(c::QdrantConnection, name::AbstractString, config::CollectionUpdate)
-    is_grpc(c) && return update_collection(c, name, config, Val(:grpc))
-    parse_bool(request(HTTP.patch, c, collection_path(name), config))
+function update_collection(conn::QdrantConnection{HTTPTransport}, name::AbstractString,
+                           config::CollectionUpdate)
+    parse_bool(http_request(HTTP.patch, conn, _collection_path(name), config))
 end
 update_collection(name::AbstractString, config::CollectionUpdate) =
     update_collection(get_client(), name, config)
-update_collection(c::QdrantConnection, name::AbstractString; kwargs...) =
-    update_collection(c, name, CollectionUpdate(; kwargs...))
+update_collection(conn::QdrantConnection, name::AbstractString; kwargs...) =
+    update_collection(conn, name, CollectionUpdate(; kwargs...))
 update_collection(name::AbstractString; kwargs...) =
     update_collection(get_client(), name; kwargs...)
 
+# ── Optimization progress ───────────────────────────────────────────────
+
 """
-    get_collection_optimizations(client, name) -> Dict{String,Any}
+    get_collection_optimizations(conn, name) -> QdrantResponse{Dict{String,Any}}
 
 Get optimization progress for a collection.
 """
-function get_collection_optimizations(c::QdrantConnection, name::AbstractString)
-    resp = request(HTTP.get, c, collection_path(name) * "/optimizations")
-    parse_response(resp)
+function get_collection_optimizations(conn::QdrantConnection{HTTPTransport}, name::AbstractString)
+    resp = http_request(HTTP.get, conn, _collection_path(name) * "/optimizations")
+    raw, status, time = _unwrap(resp)
+    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
 get_collection_optimizations(name::AbstractString) =
     get_collection_optimizations(get_client(), name)
 
-# ── Aliases ──────────────────────────────────────────────────────────────
+# ============================================================================
+# Aliases — HTTP
+# ============================================================================
 
-alias_action_body(action::AbstractString, payload::AbstractDict) =
+_alias_action(action::AbstractString, payload::AbstractDict) =
     Dict{String,Any}("actions" => [Dict(action => payload)])
 
 """
-    list_aliases(client) -> Vector{AliasDescription}
+    list_aliases(conn) -> QdrantResponse{Vector{AliasDescription}}
 
 List all aliases across collections.
 """
-function list_aliases(c::QdrantConnection)
-    is_grpc(c) && return list_aliases(c, Val(:grpc))
-    resp = request(HTTP.get, c, "/aliases")
-    r = parse_response(resp)
-    r isa AbstractDict || return AliasDescription[]
-    raw = get(r, "aliases", Any[])
-    AliasDescription[AliasDescription(a["alias_name"], a["collection_name"]) for a in raw]
+function list_aliases(conn::QdrantConnection{HTTPTransport})
+    resp = http_request(HTTP.get, conn, "/aliases")
+    raw, status, time = _unwrap(resp)
+    aliases = raw isa AbstractDict ? get(raw, "aliases", Any[]) : Any[]
+    result = AliasDescription[AliasDescription(a["alias_name"], a["collection_name"]) for a in aliases]
+    QdrantResponse(result, status, time)
 end
 list_aliases() = list_aliases(get_client())
 
 """
-    list_collection_aliases(client, collection) -> Vector{AliasDescription}
+    list_collection_aliases(conn, collection) -> QdrantResponse{Vector{AliasDescription}}
 
 List aliases for a specific collection.
 """
-function list_collection_aliases(c::QdrantConnection, name::AbstractString)
-    is_grpc(c) && return list_collection_aliases(c, name, Val(:grpc))
-    resp = request(HTTP.get, c, collection_path(name) * "/aliases")
-    r = parse_response(resp)
-    r isa AbstractDict || return AliasDescription[]
-    raw = get(r, "aliases", Any[])
-    AliasDescription[AliasDescription(a["alias_name"], a["collection_name"]) for a in raw]
+function list_collection_aliases(conn::QdrantConnection{HTTPTransport}, name::AbstractString)
+    resp = http_request(HTTP.get, conn, _collection_path(name) * "/aliases")
+    raw, status, time = _unwrap(resp)
+    aliases = raw isa AbstractDict ? get(raw, "aliases", Any[]) : Any[]
+    result = AliasDescription[AliasDescription(a["alias_name"], a["collection_name"]) for a in aliases]
+    QdrantResponse(result, status, time)
 end
 list_collection_aliases(name::AbstractString) =
     list_collection_aliases(get_client(), name)
 
 """
-    create_alias(client, alias, collection) -> Bool
+    create_alias(conn, alias, collection) -> QdrantResponse{Bool}
 """
-function create_alias(c::QdrantConnection, alias::AbstractString, collection::AbstractString)
-    is_grpc(c) && return create_alias(c, alias, collection, Val(:grpc))
-    body = alias_action_body("create_alias", Dict("collection_name" => collection, "alias_name" => alias))
-    parse_bool(request(HTTP.post, c, "/collections/aliases", body))
+function create_alias(conn::QdrantConnection{HTTPTransport}, alias::AbstractString,
+                      collection::AbstractString)
+    body = _alias_action("create_alias",
+        Dict("collection_name" => collection, "alias_name" => alias))
+    parse_bool(http_request(HTTP.post, conn, "/collections/aliases", body))
 end
 create_alias(alias::AbstractString, collection::AbstractString) =
     create_alias(get_client(), alias, collection)
 
 """
-    delete_alias(client, alias) -> Bool
+    delete_alias(conn, alias) -> QdrantResponse{Bool}
 """
-function delete_alias(c::QdrantConnection, alias::AbstractString)
-    is_grpc(c) && return delete_alias(c, alias, Val(:grpc))
-    body = alias_action_body("delete_alias", Dict("alias_name" => alias))
-    parse_bool(request(HTTP.post, c, "/collections/aliases", body))
+function delete_alias(conn::QdrantConnection{HTTPTransport}, alias::AbstractString)
+    body = _alias_action("delete_alias", Dict("alias_name" => alias))
+    parse_bool(http_request(HTTP.post, conn, "/collections/aliases", body))
 end
 delete_alias(alias::AbstractString) = delete_alias(get_client(), alias)
 
 """
-    rename_alias(client, old, new) -> Bool
+    rename_alias(conn, old, new_name) -> QdrantResponse{Bool}
 """
-function rename_alias(c::QdrantConnection, old::AbstractString, new_name::AbstractString)
-    is_grpc(c) && return rename_alias(c, old, new_name, Val(:grpc))
-    body = alias_action_body("rename_alias", Dict("old_alias_name" => old, "new_alias_name" => new_name))
-    parse_bool(request(HTTP.post, c, "/collections/aliases", body))
+function rename_alias(conn::QdrantConnection{HTTPTransport}, old::AbstractString,
+                      new_name::AbstractString)
+    body = _alias_action("rename_alias",
+        Dict("old_alias_name" => old, "new_alias_name" => new_name))
+    parse_bool(http_request(HTTP.post, conn, "/collections/aliases", body))
 end
 rename_alias(old::AbstractString, new_name::AbstractString) =
     rename_alias(get_client(), old, new_name)

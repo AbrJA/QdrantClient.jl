@@ -1,560 +1,302 @@
-# QdrantClient.jl
+<![CDATA[# QdrantClient.jl
 
 A high-performance, idiomatic Julia client for the [Qdrant](https://qdrant.tech/) vector database.
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://AbrJA.github.io/QdrantClient.jl/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://AbrJA.github.io/QdrantClient.jl/dev)
-[![Build Status](https://github.com/AbrJA/QdrantClient.jl/workflows/CI/badge.svg)](https://github.com/AbrJA/QdrantClient.jl/actions?query=workflow%3ACI+branch%3Amaster)
-
----
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Features
 
-- **Full API Coverage** — Collections, Points, Query (universal), Snapshots, Cluster, Service
-- **Dual Transport** — HTTP/REST (default) and gRPC (~2-10× faster for bulk operations)
-- **Typed Responses** — Every endpoint returns a concrete Julia type (`UpdateResponse`, `QueryResponse`, `ScrollResponse`, etc.) for type-stable downstream code
-- **Multiple Dispatch** — Every endpoint accepts an explicit `QdrantConnection` or falls back to a global default
-- **Connection Pooling** — `HTTP.jl` pool reused across requests for high throughput
-- **Typed Errors** — All HTTP failures wrapped in `QdrantError` with status code and parsed detail
-- **Flexible Point IDs** — `PointId = Union{Int, UUID}` accepted everywhere
-- **Batch-First Design** — Batch variants (`query_batch`, `batch_points`, …) for all latency-sensitive paths
-
----
-
-## What's New in v1.0
-
-### Breaking Changes
-
-- **Typed responses everywhere** — Functions now return typed structs instead of raw `Dict`:
-  - `upsert_points` → `UpdateResponse(operation_id, status)`
-  - `query_points` → `QueryResponse(points::Vector{ScoredPoint})`
-  - `scroll_points` → `ScrollResponse(points::Vector{Record}, next_page_offset)`
-  - `count_points` → `CountResponse(count)`
-  - `create_snapshot` → `SnapshotInfo(name, creation_time, size, checksum)`
-  - `health_check` → `HealthResponse(title, version)`
-
-- **Removed deprecated endpoints** — The following functions have been removed in favor of the universal `query_points` API:
-  - `search_points` / `search_batch` / `search_groups`
-  - `recommend_points` / `recommend_batch` / `recommend_groups`
-  - `discover_points` / `discover_batch`
-  - `SearchRequest`, `RecommendRequest`, `DiscoverRequest` types
-
-- **Removed `execute()` internal** — All HTTP calls now use direct `HTTP.request`.
-
-### New Features
-
-- **gRPC transport** via `GRPCTransport` — binary protocol for high-throughput workloads
-- **`query_groups`** — grouped query endpoint
-- **`facet`** — faceted search on payload fields
-- **`search_matrix_pairs` / `search_matrix_offsets`** — distance matrix endpoints
-
----
+- **Dual transport** — HTTP/REST and gRPC, selected via Julia's multiple dispatch
+- **Typed responses** — every endpoint returns `QdrantResponse{T}` with `.result`, `.status`, and `.time`
+- **Zero-cost dispatch** — parametric `QdrantConnection{T}` eliminates runtime transport checks
+- **Complete API coverage** — collections, points, queries, snapshots, payload indexes, facets, cluster status
+- **Julian design** — keyword constructors, `@enum` distance, `Union` point IDs, `StructUtils` serialization
 
 ## Installation
 
 ```julia
-] add QdrantClient
+using Pkg
+Pkg.add("QdrantClient")
 ```
-
-Requires Julia 1.12+.
-
----
 
 ## Quick Start
 
 ```julia
 using QdrantClient
 
-# ── Connection (HTTP, default) ──────────────────────────────────────────
-client = QdrantConnection()                                  # localhost:6333
-client = QdrantConnection(host="qdrant.example.com",
-                          port=6333, api_key="secret")       # remote + auth
+# Connect (HTTP, default)
+conn = QdrantConnection()
 
-# ── Connection (gRPC, ~2-10× faster) ────────────────────────────────────
-client = QdrantConnection(GRPCTransport(host="localhost", port=6334))
-
-# ── Collections ─────────────────────────────────────────────────────────
-create_collection(client, "demo",
+# Create a collection
+create_collection(conn, "demo",
     CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
-# => true
 
-# ── Points ───────────────────────────────────────────────────────────────
-resp = upsert_points(client, "demo", [
+# Insert points
+upsert_points(conn, "demo", [
     Point(id=1, vector=Float32[1, 0, 0, 0], payload=Dict("color" => "red")),
     Point(id=2, vector=Float32[0, 1, 0, 0], payload=Dict("color" => "blue")),
 ]; wait=true)
-# => UpdateResponse(operation_id=0, status="completed")
 
-# ── Query (universal API) ────────────────────────────────────────────────
-results = query_points(client, "demo"; query=Float32[1, 0, 0, 0], limit=2, with_payload=true)
-# => QueryResponse with results.points::Vector{ScoredPoint}
-
-# ── Scroll ───────────────────────────────────────────────────────────────
-page = scroll_points(client, "demo"; limit=100, with_payload=true)
-# => ScrollResponse(points::Vector{Record}, next_page_offset)
-
-# ── Cleanup ──────────────────────────────────────────────────────────────
-delete_collection(client, "demo")  # => true
+# Query
+resp = query_points(conn, "demo"; query=Float32[1, 0, 0, 0], limit=5, with_payload=true)
+resp.result.points   # Vector{ScoredPoint}
+resp.status           # "ok"
+resp.time             # server-side time in seconds
 ```
 
----
-
-## Connection & Authentication
+## Connection
 
 ```julia
-# Plain (no TLS)
-client = QdrantConnection()
-client = QdrantConnection(host="myhost", port=6333)
+# HTTP (default)
+conn = QdrantConnection()
+conn = QdrantConnection(host="qdrant.example.com", port=6333, api_key="secret", tls=true)
 
-# With API key
-client = QdrantConnection(host="cloud.qdrant.io", port=6333,
-                          api_key="your-api-key", tls=true)
+# gRPC
+conn = QdrantConnection(GRPCTransport(host="localhost", port=6334))
 
-# Custom timeout (seconds)
-client = QdrantConnection(host="localhost", port=6333, timeout=60)
-
-# gRPC transport
-client = QdrantConnection(GRPCTransport(host="localhost", port=6334))
-
-# Global default — omit the client argument anywhere
-set_client!(client)
-get_client()
+# Global default
+set_client!(conn)
+list_collections()  # uses global client
 ```
 
----
+The connection type `QdrantConnection{HTTPTransport}` or `QdrantConnection{GRPCTransport}` drives dispatch — the same function names work with both transports.
 
-## gRPC Transport
+## Response Envelope
 
-gRPC uses Protocol Buffers for binary serialization, offering significantly better performance for bulk operations (upserts, queries, scrolls).
+Every API call returns `QdrantResponse{T}`:
 
 ```julia
-# Create a gRPC connection
-grpc = QdrantConnection(GRPCTransport(host="localhost", port=6334))
-
-# All API functions work identically — transport is selected automatically
-create_collection(grpc, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
-upsert_points(grpc, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
-query_points(grpc, "demo"; query=Float32[1,0,0,0], limit=5)
+struct QdrantResponse{T}
+    result::T        # typed result
+    status::String   # server status ("ok")
+    time::Float64    # server-side duration (seconds)
+end
 ```
 
-### gRPC Limitations
-
-Due to Proto3 wire format constraints, the following limitations apply:
-
-- **`create_payload_index` with `"keyword"` type** — Proto3 does not send the default enum value (`FieldType.FieldTypeKeyword = 0`) over the wire, so creating a keyword index silently creates an integer index instead. **Workaround:** Use the HTTP transport for `create_payload_index` with keyword fields, or create keyword indexes before switching to gRPC.
-- **`get_point` (single point)** — Not available over gRPC; use `get_points(client, collection, [id])` instead.
-- **Snapshot download** — gRPC snapshot operations create/list/delete snapshots but do not support downloading snapshot files.
-
----
-
-## Collections
-
-### Creating a Collection
-
 ```julia
-# Simple dense vectors
-create_collection(client, "images",
-    CollectionConfig(vectors=VectorParams(size=512, distance=Cosine)))
-
-# Keyword shorthand
-create_collection(client, "images"; vectors=VectorParams(size=512, distance=Cosine))
-
-# Named (multi-vector) collection
-create_collection(client, "multimodal", CollectionConfig(
-    vectors=Dict{String,VectorParams}(
-        "image" => VectorParams(size=512, distance=Cosine),
-        "text"  => VectorParams(size=768, distance=Dot),
-    )
-))
-
-# Full configuration
-create_collection(client, "tuned", CollectionConfig(
-    vectors=VectorParams(size=128, distance=Euclid),
-    hnsw_config=HnswConfig(m=32, ef_construct=200),
-    optimizers_config=OptimizersConfig(indexing_threshold=20_000),
-    quantization_config=ScalarQuantization(
-        scalar=ScalarQuantizationConfig(type="int8", quantile=0.99, always_ram=true)
-    ),
-    on_disk_payload=true,
-    shard_number=2,
-))
+resp = count_points(conn, "demo"; exact=true)
+resp.result.count  # Int
+resp.status        # "ok"
+resp.time          # 0.00042
 ```
 
-### Collection Operations
+## API Reference
+
+### Collections
 
 ```julia
-list_collections(client)              # => Vector{CollectionDescription}
-get_collection(client, "images")      # => Dict{String,Any} (full info)
-collection_exists(client, "images")   # => true/false
-update_collection(client, "images",
-    CollectionUpdate(optimizers_config=OptimizersConfig(indexing_threshold=50_000)))
-                                      # => true
-delete_collection(client, "images")   # => true
+list_collections(conn) -> QdrantResponse{Vector{CollectionDescription}}
+create_collection(conn, name, config) -> QdrantResponse{Bool}
+create_collection(conn, name; vectors=VectorParams(...)) -> QdrantResponse{Bool}
+delete_collection(conn, name) -> QdrantResponse{Bool}
+collection_exists(conn, name) -> QdrantResponse{Bool}
+get_collection(conn, name) -> QdrantResponse{Dict{String,Any}}
+update_collection(conn, name, update) -> QdrantResponse{Bool}
 ```
 
 ### Aliases
 
 ```julia
-list_aliases(client)                                    # => Vector{AliasDescription}
-list_collection_aliases(client, "images")               # => Vector{AliasDescription}
-create_alias(client, "images_v2", "images")             # => true
-rename_alias(client, "images_v2", "images_v3")          # => true
-delete_alias(client, "images_v3")                       # => true
+create_alias(conn, alias, collection) -> QdrantResponse{Bool}
+delete_alias(conn, alias) -> QdrantResponse{Bool}
+rename_alias(conn, old, new) -> QdrantResponse{Bool}
+list_aliases(conn) -> QdrantResponse{Vector{AliasDescription}}
+list_collection_aliases(conn, collection) -> QdrantResponse{Vector{AliasDescription}}
 ```
 
----
-
-## Points
-
-### Upsert
+### Points
 
 ```julia
-# Integer IDs — returns UpdateResponse
-resp = upsert_points(client, "demo", [
-    Point(id=1, vector=Float32[1, 0, 0, 0]),
-    Point(id=2, vector=Float32[0, 1, 0, 0], payload=Dict("label" => "cat")),
-]; wait=true)
-resp.status  # "completed"
-
-# UUID IDs
-using UUIDs
-upsert_points(client, "demo", [
-    Point(id=uuid4(), vector=Float32[1, 0, 0, 0]),
-])
+upsert_points(conn, collection, points; wait=false) -> QdrantResponse{UpdateResult}
+get_points(conn, collection, ids; with_payload, with_vectors) -> QdrantResponse{Vector{Record}}
+get_point(conn, collection, id) -> QdrantResponse{Record}
+delete_points(conn, collection, ids_or_filter; wait=false) -> QdrantResponse{UpdateResult}
+scroll_points(conn, collection; limit, filter, with_payload) -> QdrantResponse{ScrollResult}
+count_points(conn, collection; filter, exact) -> QdrantResponse{CountResult}
+batch_points(conn, collection, operations; wait=false) -> QdrantResponse{Vector{UpdateResult}}
 ```
 
-### Retrieve
+### Payload Operations
 
 ```julia
-records = get_points(client, "demo", [1, 2, 3]; with_payload=true)
-# => Vector{Record}  — each Record has .id, .payload, .vector
-
-record = get_point(client, "demo", 1)  # => Record (HTTP only)
-```
-
-### Delete
-
-```julia
-delete_points(client, "demo", [1, 2])   # => UpdateResponse
-delete_points(client, "demo", 1)        # single ID
-delete_points(client, "demo",           # by filter
-    Filter(must=[FieldCondition(key="label", match=MatchValue(value="cat"))]))
-```
-
-### Payload
-
-```julia
-set_payload(client, "demo", Dict("verified" => true), [1, 2])
-overwrite_payload(client, "demo", Dict("verified" => true), [1])
-delete_payload(client, "demo", ["verified"], [1])
-clear_payload(client, "demo", [1, 2])
-# All return UpdateResponse
+set_payload(conn, collection, payload, ids_or_filter) -> QdrantResponse{UpdateResult}
+overwrite_payload(conn, collection, payload, ids_or_filter) -> QdrantResponse{UpdateResult}
+delete_payload(conn, collection, keys, ids_or_filter) -> QdrantResponse{UpdateResult}
+clear_payload(conn, collection, ids; wait=false) -> QdrantResponse{UpdateResult}
 ```
 
 ### Vectors
 
 ```julia
-update_vectors(client, "demo", [
-    Point(id=1, vector=Float32[0.9, 0.1, 0, 0]),
-])  # => UpdateResponse
-
-delete_vectors(client, "multimodal", ["text"], [1, 2])  # => UpdateResponse
+update_vectors(conn, collection, points) -> QdrantResponse{UpdateResult}
+delete_vectors(conn, collection, vector_names, ids; wait=false) -> QdrantResponse{UpdateResult}
 ```
 
-### Scroll & Count
+### Query
 
 ```julia
-page = scroll_points(client, "demo"; limit=100, with_payload=true)
-# => ScrollResponse
-page.points             # Vector{Record}
-page.next_page_offset   # nothing or next offset
-
-# Count
-c = count_points(client, "demo"; exact=true)
-# => CountResponse
-c.count  # 42
-
-# With filter
-count_points(client, "demo";
-    filter=Filter(must=[FieldCondition(key="label", match=MatchValue(value="cat"))]))
+query_points(conn, collection, request) -> QdrantResponse{QueryResult}
+query_points(conn, collection; query, limit, kwargs...) -> QdrantResponse{QueryResult}
+query_batch(conn, collection, requests) -> QdrantResponse{Vector{QueryResult}}
+query_groups(conn, collection, request) -> QdrantResponse{GroupsResult}
+facet(conn, collection, field; kwargs...) -> QdrantResponse{FacetResult}
 ```
 
-### Payload Index
+### Snapshots
 
 ```julia
-create_payload_index(client, "demo", "label"; field_schema="keyword")
-# => UpdateResponse
-
-create_payload_index(client, "demo", "description";
-    field_schema=TextIndexParams(tokenizer="word", lowercase=true))
-
-delete_payload_index(client, "demo", "label")
-# => UpdateResponse
+create_snapshot(conn, collection) -> QdrantResponse{SnapshotInfo}
+list_snapshots(conn, collection) -> QdrantResponse{Vector{SnapshotInfo}}
+delete_snapshot(conn, collection, name) -> QdrantResponse{Bool}
+create_full_snapshot(conn) -> QdrantResponse{SnapshotInfo}
+list_full_snapshots(conn) -> QdrantResponse{Vector{SnapshotInfo}}
+delete_full_snapshot(conn, name) -> QdrantResponse{Bool}
 ```
 
-### Batch Operations
+### Payload Indexes
 
 ```julia
-results = batch_points(client, "demo", [
-    Dict("upsert" => Dict("points" => [
-        Dict("id" => 10, "vector" => Float32[1,0,0,0]),
-    ])),
-    Dict("delete" => Dict("points" => [5, 6])),
-])
-# => Vector{UpdateResponse}
+create_payload_index(conn, collection, field; field_schema, wait) -> QdrantResponse{UpdateResult}
+delete_payload_index(conn, collection, field; wait) -> QdrantResponse{UpdateResult}
 ```
 
----
-
-## Query (Universal API)
-
-The `query_points` API is the single endpoint for nearest-neighbor search,
-recommendations, discovery, and re-ranking. It replaces the deprecated
-`search_points`, `recommend_points`, and `discover_points`.
+### Service
 
 ```julia
-# Nearest-neighbor search
-results = query_points(client, "demo",
-    QueryRequest(query=Float32[1, 0, 0, 0], limit=5))
-# => QueryResponse
-results.points  # Vector{ScoredPoint} — each has .id, .version, .score, .payload, .vector
-
-# With kwargs
-query_points(client, "demo"; query=Float32[1, 0, 0, 0], limit=5, with_payload=true)
-
-# Recommendation via query API
-query_points(client, "demo",
-    QueryRequest(query=Dict("recommend" => Dict("positive" => [1])), limit=5))
-
-# Prefetch + re-rank (two-stage retrieval)
-query_points(client, "demo",
-    QueryRequest(
-        query=Float32[1, 0, 0, 0],
-        limit=5,
-        prefetch=[Dict("query" => Float32[1, 0, 0, 0], "limit" => 50)]))
-
-# Batch
-query_batch(client, "demo", [
-    QueryRequest(query=Float32[1, 0, 0, 0], limit=3),
-    QueryRequest(query=Float32[0, 1, 0, 0], limit=3),
-])
-# => Vector{QueryResponse}
-
-# Grouped query
-query_groups(client, "demo"; query=Float32[1, 0, 0, 0], group_by="label",
-    limit=10, group_size=2)
-# => GroupsResponse
+health_check(conn) -> QdrantResponse{HealthInfo}
+get_version(conn) -> QdrantResponse{HealthInfo}
+get_metrics(conn) -> QdrantResponse{String}
+get_telemetry(conn) -> QdrantResponse{Dict{String,Any}}
+cluster_status(conn) -> QdrantResponse{Dict{String,Any}}
 ```
 
----
+## Type Reference
 
-## Faceted Search
-
-```julia
-result = facet(client, "demo"; key="color", limit=10)
-# => FacetResponse
-result.hits  # Vector{FacetHit} — each has .value, .count
-```
-
----
-
-## Filters
-
-Filters can be used in `delete_points`, `set_payload`, `scroll_points`, `count_points`,
-and `query_points`.
-
-```julia
-# Exact keyword match
-Filter(must=[FieldCondition(key="color", match=MatchValue(value="red"))])
-
-# Match any of several values
-Filter(must=[FieldCondition(key="color", match=MatchAny(any=["red", "blue"]))])
-
-# Numeric range
-Filter(must=[FieldCondition(key="price", range=RangeCondition(gte=10.0, lte=99.99))])
-
-# Full-text match
-Filter(must=[FieldCondition(key="description", match=MatchText(text="hello world"))])
-
-# Filter by point ID
-Filter(must=[HasIdCondition(has_id=[1, 2, 3])])
-
-# Compound — must AND should
-Filter(
-    must=[FieldCondition(key="active", match=MatchValue(value=true))],
-    should=[
-        FieldCondition(key="color", match=MatchValue(value="red")),
-        FieldCondition(key="color", match=MatchValue(value="blue")),
-    ])
-
-# Negation
-Filter(must_not=[FieldCondition(key="archived", match=MatchValue(value=true))])
-```
-
----
-
-## Snapshots
-
-```julia
-snap = create_snapshot(client, "demo")
-# => SnapshotInfo
-snap.name              # snapshot file name
-snap.creation_time
-snap.size
-
-snaps = list_snapshots(client, "demo")   # => Vector{SnapshotInfo}
-delete_snapshot(client, "demo", snap.name)  # => true
-
-# Full storage snapshots
-create_full_snapshot(client)             # => SnapshotInfo
-list_full_snapshots(client)              # => Vector{SnapshotInfo}
-delete_full_snapshot(client, snap.name)  # => true
-```
-
----
-
-## Cluster & Service
-
-```julia
-health = health_check(client)
-# => HealthResponse
-health.title    # "qdrant - vectorass database"
-health.version  # "1.x.y"
-
-get_version(client)          # => HealthResponse
-metrics = get_metrics(client)  # => String (Prometheus format)
-telemetry = get_telemetry(client)  # => Dict{String,Any}
-cluster_status(client)       # => Dict{String,Any}
-```
-
----
-
-## Response Type Reference
-
-| Type | Fields | Returned By |
-|------|--------|-------------|
-| `UpdateResponse` | `operation_id::Int`, `status::String` | `upsert_points`, `delete_points`, `set_payload`, `clear_payload`, `create_payload_index`, etc. |
-| `QueryResponse` | `points::Vector{ScoredPoint}` | `query_points`, `query_batch` |
-| `ScoredPoint` | `id::PointId`, `version::Int`, `score::Float64`, `payload`, `vector` | (nested in QueryResponse) |
-| `ScrollResponse` | `points::Vector{Record}`, `next_page_offset` | `scroll_points` |
-| `Record` | `id::PointId`, `payload`, `vector` | `get_points`, `get_point`, (nested in ScrollResponse) |
-| `CountResponse` | `count::Int` | `count_points` |
-| `GroupsResponse` | `groups::Vector{GroupResult}` | `query_groups` |
-| `GroupResult` | `id`, `hits::Vector{ScoredPoint}` | (nested in GroupsResponse) |
-| `SnapshotInfo` | `name`, `creation_time`, `size`, `checksum` | `create_snapshot`, `list_snapshots` |
-| `CollectionDescription` | `name::String` | `list_collections` |
-| `AliasDescription` | `alias_name::String`, `collection_name::String` | `list_aliases` |
-| `HealthResponse` | `title::String`, `version::String` | `health_check`, `get_version` |
-| `FacetResponse` | `hits::Vector{FacetHit}` | `facet` |
-| `FacetHit` | `value`, `count::Int` | (nested in FacetResponse) |
-
-### Core Types
+### Config Types
 
 | Type | Purpose |
 |------|---------|
-| `QdrantConnection` | Client connection (HTTP or gRPC transport) |
-| `QdrantError` | Typed error with `status`, `message`, `detail` |
-| `PointId` | `Union{Int, UUID}` |
-| `GRPCTransport` | gRPC transport configuration |
-
-### Collection Types
-
-| Type | Purpose |
-|------|---------|
-| `CollectionConfig` | Full collection creation config |
-| `CollectionUpdate` | Patch payload for `update_collection` |
-| `VectorParams` | Dense vector field config (size, distance, HNSW, quantization) |
-| `SparseVectorParams` | Sparse vector field config |
-| `HnswConfig` | HNSW index tuning |
+| `CollectionConfig` | Collection creation parameters (vectors, hnsw, optimizers, wal) |
+| `CollectionUpdate` | Collection update parameters |
+| `VectorParams` | Vector field config (size, distance, hnsw_config, on_disk) |
+| `HnswConfig` | HNSW index parameters (m, ef_construct) |
 | `WalConfig` | Write-ahead log config |
 | `OptimizersConfig` | Segment optimizer config |
+| `SearchParams` | Query-time search parameters (hnsw_ef, exact, quantization) |
+| `TextIndexParams` | Full-text index config (tokenizer, lowercase) |
 
-### Quantization Types
-
-| Type | Purpose |
-|------|---------|
-| `ScalarQuantization` | Scalar (int8) quantization wrapper |
-| `ProductQuantization` | PQ quantization wrapper |
-| `BinaryQuantization` | Binary quantization wrapper |
-
-### Filter Types
-
-| Type | Purpose |
-|------|---------|
-| `Filter` | Compound filter (`must`, `should`, `must_not`) |
-| `FieldCondition` | Condition on a payload field |
-| `MatchValue` | Exact value match |
-| `MatchAny` | Match any of a list |
-| `MatchText` | Full-text match |
-| `RangeCondition` | Numeric range |
-| `HasIdCondition` | Filter by point IDs |
-
-### Distance Values
+### Distance
 
 ```julia
-Cosine     # cosine similarity (normalized vectors)
-Euclid     # Euclidean distance
-Dot        # dot-product / inner product
-Manhattan  # L1 distance
+@enum Distance Cosine Euclid Dot Manhattan
 ```
 
----
+### Point Types
 
-## Migration from v0.x
+```julia
+Point(id, vector; payload)    # id::PointId = Union{Int, UUID}
+NamedVector(name, vector)
+```
 
-| v0.x | v1.0 |
-|------|------|
-| `search_points(c, col, SearchRequest(...))` | `query_points(c, col, QueryRequest(query=..., limit=...))` |
-| `recommend_points(c, col, RecommendRequest(...))` | `query_points(c, col, QueryRequest(query=Dict("recommend" => ...), limit=...))` |
-| `discover_points(c, col, DiscoverRequest(...))` | `query_points(c, col, QueryRequest(query=Dict("discover" => ...), limit=...))` |
-| `result["points"]` (Dict access) | `result.points` (typed struct field) |
-| `result["status"]` | `result.status` |
+### Filter Conditions
 
----
+```julia
+Filter(; must, should, must_not, min_should)
+FieldCondition(; key, match, range)
+MatchValue(; value)
+MatchAny(; any)
+MatchText(; text)
+RangeCondition(; gt, gte, lt, lte)
+HasIdCondition(; has_id)
+IsEmptyCondition(; is_empty)
+IsNullCondition(; is_null)
+```
+
+### Result Types
+
+| Type | Fields |
+|------|--------|
+| `UpdateResult` | `operation_id::Int`, `status::String` |
+| `CountResult` | `count::Int` |
+| `Record` | `id::PointId`, `payload`, `vector` |
+| `ScoredPoint` | `id::PointId`, `version::Int`, `score::Float64`, `payload`, `vector` |
+| `ScrollResult` | `points::Vector{Record}`, `next_page_offset` |
+| `QueryResult` | `points::Vector{ScoredPoint}` |
+| `GroupResult` | `id`, `hits::Vector{ScoredPoint}` |
+| `GroupsResult` | `groups::Vector{GroupResult}` |
+| `SnapshotInfo` | `name::String`, `creation_time`, `size::Int`, `checksum` |
+| `HealthInfo` | `title::String`, `version::String`, `commit::String` |
+| `FacetResult` | `hits::Vector{FacetHit}` |
+| `FacetHit` | `value`, `count::Int` |
+| `CollectionDescription` | `name::String` |
+| `AliasDescription` | `alias_name::String`, `collection_name::String` |
+
+## gRPC Transport
+
+The gRPC transport supports the same API surface. Pass a `GRPCTransport` to select it:
+
+```julia
+conn = QdrantConnection(GRPCTransport(host="localhost", port=6334))
+
+# Same functions, dispatched to gRPC
+create_collection(conn, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Cosine)))
+query_points(conn, "demo"; query=Float32[1, 0, 0, 0], limit=5)
+```
+
+**Known limitation**: Proto3 does not encode the default enum value (0), so `field_schema="keyword"` in `create_payload_index` may not work over gRPC. Use `"integer"`, `"float"`, or `"text"` instead.
+
+## Named Vectors
+
+```julia
+cfg = CollectionConfig(vectors=Dict(
+    "image" => VectorParams(size=512, distance=Cosine),
+    "text"  => VectorParams(size=768, distance=Dot),
+))
+create_collection(conn, "multi", cfg)
+
+pts = [Point(id=1, vector=Dict(
+    "image" => Float32.(randn(512)),
+    "text"  => Float32.(randn(768)),
+))]
+upsert_points(conn, "multi", pts)
+
+query_points(conn, "multi"; query=Float32.(randn(512)), using_="image", limit=10)
+```
+
+## Filtering
+
+```julia
+f = Filter(must=[
+    FieldCondition(key="color", match=MatchValue(value="red")),
+    FieldCondition(key="price", range=RangeCondition(gte=10.0, lte=100.0)),
+])
+query_points(conn, "demo"; query=Float32[1, 0, 0, 0], limit=5, filter=f)
+```
 
 ## Error Handling
 
+API errors throw `QdrantError`:
+
 ```julia
 try
-    query_points(client, "missing_collection";
-        query=Float32[1,0,0,0], limit=5)
-catch err
-    if err isa QdrantError
-        println("HTTP $(err.status): $(err.message)")
-        println("Detail: $(err.detail)")
-    end
+    get_collection(conn, "nonexistent")
+catch e::QdrantError
+    e.status   # HTTP status code (Int)
+    e.message  # error message (String)
+    e.detail   # optional parsed error body
 end
 ```
 
----
+## Requirements
 
-## Global Client
-
-All exported functions accept an optional first `QdrantConnection` argument. When omitted,
-a global default is used:
-
-```julia
-set_client!(QdrantConnection(host="prod-qdrant", port=6333, api_key="key"))
-
-# These are equivalent:
-query_points(get_client(), "demo"; query=q, limit=5)
-query_points("demo"; query=q, limit=5)
-```
-
----
-
-## Development
-
-```bash
-# Start a local Qdrant instance (HTTP + gRPC)
-docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant
-
-# Run tests
-julia --project=. -e 'using Pkg; Pkg.test()'
-```
-
----
+- Julia 1.10+
+- Qdrant server (tested with v1.9+)
+- HTTP.jl, JSON.jl, StructUtils.jl
+- For gRPC: ProtoBuf.jl, gRPCClient.jl
 
 ## License
 
-[MIT](LICENSE)
+MIT — see [LICENSE](LICENSE).
+]]>

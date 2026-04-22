@@ -3,28 +3,25 @@
 
 A Julian client for the [Qdrant](https://qdrant.tech) vector database.
 
-Supports both HTTP/REST and gRPC transports for maximum flexibility and performance.
-Leverages `StructUtils.jl` for zero-cost struct ↔ JSON mapping and `gRPCClient.jl`
-with `ProtoBuf.jl` for high-performance binary protocol communication.
+Supports both HTTP/REST and gRPC transports. Every endpoint returns a
+`QdrantResponse{T}` carrying the typed `.result`, the server `.status`,
+and the server-side `.time`.
 
 # Quick Start — HTTP (default)
 ```julia
 using QdrantClient
 
-client = QdrantConnection()  # localhost:6333 HTTP
-create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
-upsert_points(client, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
-query_points(client, "demo", QueryRequest(query=Float32[1,0,0,0], limit=5))
+conn = QdrantConnection()
+create_collection(conn, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+upsert_points(conn, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
+resp = query_points(conn, "demo"; query=Float32[1,0,0,0], limit=5)
+resp.result.points   # Vector{ScoredPoint}
 ```
 
-# Quick Start — gRPC (~2-10x faster for bulk operations)
+# Quick Start — gRPC
 ```julia
-using QdrantClient
-
-client = QdrantConnection(GRPCTransport(host="localhost", port=6334))
-create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
-upsert_points(client, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
-query_points(client, "demo", QueryRequest(query=Float32[1,0,0,0], limit=5))
+conn = QdrantConnection(GRPCTransport(host="localhost", port=6334))
+# Same API — transport is selected via dispatch
 ```
 """
 module QdrantClient
@@ -50,7 +47,7 @@ include("types.jl")
 """
     AbstractTransport
 
-Abstract transport layer. Subtype this to add gRPC or other backends.
+Base type for transport backends. Subtype to add new protocols.
 """
 abstract type AbstractTransport end
 
@@ -69,65 +66,63 @@ mutable struct HTTPTransport <: AbstractTransport
 end
 
 function HTTPTransport(;
-    host::String="localhost",
-    port::Int=6333,
-    api_key::Optional{String}=nothing,
-    timeout::Int=30,
-    tls::Bool=false,
+    host::String = "localhost",
+    port::Int    = 6333,
+    api_key::Optional{String} = nothing,
+    timeout::Int = 30,
+    tls::Bool    = false,
 )
     HTTPTransport(host, port, api_key, timeout, tls, nothing)
 end
 
-function ensure_pool!(transport::HTTPTransport)
-    transport.pool === nothing && (transport.pool = HTTP.Pool())
-    transport.pool
+function ensure_pool!(t::HTTPTransport)
+    t.pool === nothing && (t.pool = HTTP.Pool())
+    t.pool
 end
 
-function base_url(transport::HTTPTransport)
-    scheme = transport.tls ? "https" : "http"
-    "$scheme://$(transport.host):$(transport.port)"
-end
+base_url(t::HTTPTransport) = "$(t.tls ? "https" : "http")://$(t.host):$(t.port)"
 
-function transport_headers(transport::HTTPTransport)
-    headers = [
+function transport_headers(t::HTTPTransport)
+    headers = Pair{String,String}[
         "Content-Type" => "application/json",
-        "User-Agent" => "QdrantClient.jl/$CLIENT_VERSION",
+        "User-Agent"   => "QdrantClient.jl/$CLIENT_VERSION",
     ]
-    transport.api_key !== nothing && push!(headers, "api-key" => transport.api_key)
+    t.api_key !== nothing && push!(headers, "api-key" => t.api_key)
     headers
 end
 
-function transport_url(transport::HTTPTransport, path::AbstractString)
+function transport_url(t::HTTPTransport, path::AbstractString)
     p = startswith(path, '/') ? path[2:end] : path
-    "$(base_url(transport))/$p"
+    "$(base_url(t))/$p"
 end
 
 # ============================================================================
-# QdrantConnection — the main client
+# QdrantConnection{T} — parametric on transport for dispatch
 # ============================================================================
 
 """
-    QdrantConnection
+    QdrantConnection{T<:AbstractTransport}
 
-Connection to a Qdrant server backed by an `AbstractTransport`.
+Connection to a Qdrant server.  The type parameter `T` selects the transport,
+enabling zero-cost dispatch to HTTP or gRPC code paths.
 
 # Constructors
 ```julia
-QdrantConnection()                          # localhost:6333
-QdrantConnection(host="myhost", port=6334)  # custom host/port
-QdrantConnection(transport)                 # custom transport
+QdrantConnection()                                        # HTTP localhost:6333
+QdrantConnection(host="myhost", port=6333, api_key="k")  # HTTP with options
+QdrantConnection(GRPCTransport(host="h", port=6334))      # gRPC
 ```
 """
-struct QdrantConnection
-    transport::AbstractTransport
+struct QdrantConnection{T<:AbstractTransport}
+    transport::T
 end
 
 function QdrantConnection(;
-    host::String="localhost",
-    port::Int=6333,
-    api_key::Optional{String}=nothing,
-    timeout::Int=30,
-    tls::Bool=false,
+    host::String = "localhost",
+    port::Int    = 6333,
+    api_key::Optional{String} = nothing,
+    timeout::Int = 30,
+    tls::Bool    = false,
 )
     QdrantConnection(HTTPTransport(; host, port, api_key, timeout, tls))
 end
@@ -135,9 +130,9 @@ end
 const _GLOBAL_CLIENT = Ref{QdrantConnection}()
 
 """
-    set_client!(c::QdrantConnection) -> QdrantConnection
+    set_client!(conn) -> QdrantConnection
 
-Set the global default client.
+Set the global default connection.
 """
 function set_client!(conn::QdrantConnection)
     _GLOBAL_CLIENT[] = conn
@@ -147,14 +142,14 @@ end
 """
     get_client() -> QdrantConnection
 
-Return the global default client, creating one if needed.
+Return the global default connection, creating one if needed.
 """
 function get_client()
     isassigned(_GLOBAL_CLIENT) ? _GLOBAL_CLIENT[] : (_GLOBAL_CLIENT[] = QdrantConnection())
 end
 
 # ============================================================================
-# Serialization — powered by JSON.jl + StructUtils
+# Serialization
 # ============================================================================
 
 const _JSON_KW = (omit_null=true, omit_empty=true)
@@ -162,15 +157,15 @@ const _JSON_KW = (omit_null=true, omit_empty=true)
 """
     serialize_body(x) -> String
 
-Serialize a value to JSON, stripping `nothing` fields and empty collections.
+Serialize to JSON, stripping `nothing` fields and empty collections.
 """
 serialize_body(x) = JSON.json(x; _JSON_KW...)
 
 # ============================================================================
-# HTTP Request Infrastructure
+# HTTP request infrastructure
 # ============================================================================
 
-function parse_error(resp::HTTP.Response)
+function _parse_error(resp::HTTP.Response)
     status = Int(resp.status)
     body = String(resp.body)
     isempty(body) && return QdrantError(status, "API error $status")
@@ -187,232 +182,189 @@ function parse_error(resp::HTTP.Response)
 end
 
 """
-    request(method, client, path, [body]; query=nothing) -> HTTP.Response
+    http_request(method, conn, path, [body]; query=nothing) -> HTTP.Response
 
 Low-level HTTP request with error handling and connection pooling.
 """
-function request(method::Function, conn::QdrantConnection, path::AbstractString, body=nothing; query=nothing)
-    transport = conn.transport::HTTPTransport
-    url = transport_url(transport, path)
+function http_request(method::Function, conn::QdrantConnection{HTTPTransport},
+                      path::AbstractString, body=nothing; query=nothing)
+    t = conn.transport
+    url = transport_url(t, path)
     kw = Dict{Symbol,Any}(
-        :pool => ensure_pool!(transport),
-        :headers => transport_headers(transport),
+        :pool             => ensure_pool!(t),
+        :headers          => transport_headers(t),
         :status_exception => false,
     )
     query !== nothing && (kw[:query] = query)
     if body !== nothing
-        kw[:body] = if body isa AbstractString
-            body
-        else
-            serialize_body(body)
-        end
+        kw[:body] = body isa AbstractString ? body : serialize_body(body)
     end
     resp = method(url; kw...)
-    resp.status >= 400 && throw(parse_error(resp))
+    resp.status >= 400 && throw(_parse_error(resp))
     resp
 end
 
-"""
-    parse_response(resp::HTTP.Response)
+# ============================================================================
+# Response parsing — extract Qdrant {result, status, time} envelope
+# ============================================================================
 
-Parse the JSON response, unwrapping Qdrant's `{status, time, result}` envelope.
-Returns the raw `result` value (or entire body if no envelope).
 """
-function parse_response(resp::HTTP.Response)
+    _unwrap(resp) -> (result, status, time)
+
+Parse a Qdrant JSON response, returning `(result, status_string, time_float)`.
+"""
+function _unwrap(resp::HTTP.Response)
     b = String(resp.body)
-    isempty(b) && return nothing
+    isempty(b) && return (nothing, "ok", 0.0)
     parsed = JSON.parse(b)
-    haskey(parsed, "result") ? parsed["result"] : parsed
+    result = get(parsed, "result", parsed)
+    status = let s = get(parsed, "status", "ok")
+        s isa AbstractDict ? get(s, "error", "ok") : string(s)
+    end
+    time = Float64(get(parsed, "time", 0.0))
+    (result, String(status), time)
 end
 
-# ── Typed Response Constructors ──────────────────────────────────────────
+# ── Typed builders ───────────────────────────────────────────────────────
 
-"""
-    parse_update(resp::HTTP.Response) -> UpdateResponse
-
-Parse an update/mutation response into a typed `UpdateResponse`.
-"""
-function parse_update(resp::HTTP.Response)
-    r = parse_response(resp)
-    r === true && return UpdateResponse(0, "completed")
-    r isa AbstractDict || return UpdateResponse(0, "completed")
-    UpdateResponse(
-        get(r, "operation_id", 0)::Union{Int,Int64},
-        get(r, "status", "completed")::String,
+function _to_update_result(raw)::UpdateResult
+    raw === true  && return UpdateResult(0, "completed")
+    raw isa AbstractDict || return UpdateResult(0, "completed")
+    UpdateResult(
+        Int(get(raw, "operation_id", 0)),
+        String(get(raw, "status", "completed")),
     )
 end
 
-"""
-    parse_bool(resp::HTTP.Response) -> Bool
-
-Parse a boolean result.
-"""
-function parse_bool(resp::HTTP.Response)
-    r = parse_response(resp)
-    r === true
-end
-
-"""
-    parse_records(resp::HTTP.Response) -> Vector{Record}
-
-Parse an array of point records.
-"""
-function parse_records(resp::HTTP.Response)
-    r = parse_response(resp)
-    r isa AbstractVector || return Record[]
-    Record[_dict_to_record(p) for p in r]
-end
-
-function _dict_to_record(d::AbstractDict)
+function _to_record(d::AbstractDict)::Record
     id = d["id"]
     pid = id isa Integer ? Int(id) : UUID(string(id))
-    Record(
-        pid,
-        get(d, "payload", nothing),
-        get(d, "vector", nothing),
-    )
+    Record(pid, get(d, "payload", nothing), get(d, "vector", nothing))
 end
 
-"""
-    parse_scored_points(resp::HTTP.Response) -> Vector{ScoredPoint}
-
-Parse an array of scored points (from deprecated search or query results).
-"""
-function parse_scored_points(raw)
-    raw isa AbstractVector || return ScoredPoint[]
-    ScoredPoint[_dict_to_scored(p) for p in raw]
-end
-
-function _dict_to_scored(d::AbstractDict)
+function _to_scored(d::AbstractDict)::ScoredPoint
     id = d["id"]
     pid = id isa Integer ? Int(id) : UUID(string(id))
     ScoredPoint(
         pid,
-        get(d, "version", 0)::Union{Int,Int64},
+        Int(get(d, "version", 0)),
         Float64(get(d, "score", 0.0)),
         get(d, "payload", nothing),
         get(d, "vector", nothing),
     )
 end
 
-function _dict_to_point_id(v)
+function _to_point_id(v)::PointId
     v isa Integer ? Int(v) : UUID(string(v))
 end
 
-"""
-    parse_query(resp::HTTP.Response) -> QueryResponse
+# ── High-level response constructors ─────────────────────────────────────
 
-Parse a query_points response.
-"""
-function parse_query(resp::HTTP.Response)
-    r = parse_response(resp)
-    if r isa AbstractDict && haskey(r, "points")
-        QueryResponse(parse_scored_points(r["points"]))
-    elseif r isa AbstractVector
-        QueryResponse(parse_scored_points(r))
+function parse_update(resp::HTTP.Response)::QdrantResponse{UpdateResult}
+    raw, status, time = _unwrap(resp)
+    QdrantResponse(_to_update_result(raw), status, time)
+end
+
+function parse_bool(resp::HTTP.Response)::QdrantResponse{Bool}
+    raw, status, time = _unwrap(resp)
+    QdrantResponse(raw === true, status, time)
+end
+
+function parse_records(resp::HTTP.Response)::QdrantResponse{Vector{Record}}
+    raw, status, time = _unwrap(resp)
+    records = raw isa AbstractVector ? Record[_to_record(p) for p in raw] : Record[]
+    QdrantResponse(records, status, time)
+end
+
+function parse_query(resp::HTTP.Response)::QdrantResponse{QueryResult}
+    raw, status, time = _unwrap(resp)
+    points = if raw isa AbstractDict && haskey(raw, "points")
+        ScoredPoint[_to_scored(p) for p in raw["points"]]
+    elseif raw isa AbstractVector
+        ScoredPoint[_to_scored(p) for p in raw]
     else
-        QueryResponse(ScoredPoint[])
+        ScoredPoint[]
+    end
+    QdrantResponse(QueryResult(points), status, time)
+end
+
+function parse_scroll(resp::HTTP.Response)::QdrantResponse{ScrollResult}
+    raw, status, time = _unwrap(resp)
+    if raw isa AbstractDict
+        pts = haskey(raw, "points") ? Record[_to_record(p) for p in raw["points"]] : Record[]
+        npo_raw = get(raw, "next_page_offset", nothing)
+        npo = npo_raw === nothing ? nothing : _to_point_id(npo_raw)
+        QdrantResponse(ScrollResult(pts, npo), status, time)
+    else
+        QdrantResponse(ScrollResult(Record[], nothing), status, time)
     end
 end
 
-"""
-    parse_scroll(resp::HTTP.Response) -> ScrollResponse
-
-Parse a scroll_points response.
-"""
-function parse_scroll(resp::HTTP.Response)
-    r = parse_response(resp)
-    r isa AbstractDict || return ScrollResponse(Record[], nothing)
-    points = haskey(r, "points") ? Record[_dict_to_record(p) for p in r["points"]] : Record[]
-    offset_raw = get(r, "next_page_offset", nothing)
-    offset = offset_raw === nothing ? nothing : _dict_to_point_id(offset_raw)
-    ScrollResponse(points, offset)
+function parse_count(resp::HTTP.Response)::QdrantResponse{CountResult}
+    raw, status, time = _unwrap(resp)
+    count = raw isa AbstractDict ? Int(get(raw, "count", 0)) : 0
+    QdrantResponse(CountResult(count), status, time)
 end
 
-"""
-    parse_count(resp::HTTP.Response) -> CountResponse
-
-Parse a count_points response.
-"""
-function parse_count(resp::HTTP.Response)
-    r = parse_response(resp)
-    r isa AbstractDict || return CountResponse(0)
-    CountResponse(Int(get(r, "count", 0)))
-end
-
-"""
-    parse_groups(resp::HTTP.Response) -> GroupsResponse
-
-Parse a query_groups response.
-"""
-function parse_groups(resp::HTTP.Response)
-    r = parse_response(resp)
-    r isa AbstractDict || return GroupsResponse(GroupResult[])
-    raw_groups = get(r, "groups", Any[])
+function parse_groups(resp::HTTP.Response)::QdrantResponse{GroupsResult}
+    raw, status, time = _unwrap(resp)
     groups = GroupResult[]
-    for g in raw_groups
-        gid = get(g, "id", nothing)
-        hits = parse_scored_points(get(g, "hits", Any[]))
-        push!(groups, GroupResult(gid, hits))
+    if raw isa AbstractDict
+        for g in get(raw, "groups", Any[])
+            gid = get(g, "id", nothing)
+            hits_raw = get(g, "hits", Any[])
+            hits = ScoredPoint[_to_scored(p) for p in hits_raw]
+            push!(groups, GroupResult(gid, hits))
+        end
     end
-    GroupsResponse(groups)
+    QdrantResponse(GroupsResult(groups), status, time)
 end
 
-"""
-    parse_snapshot(resp::HTTP.Response) -> SnapshotInfo
-
-Parse a create/get snapshot response.
-"""
-function parse_snapshot(resp::HTTP.Response)
-    r = parse_response(resp)
-    r isa AbstractDict || return SnapshotInfo("", nothing, 0, nothing)
-    SnapshotInfo(
-        get(r, "name", "")::String,
-        get(r, "creation_time", nothing),
-        Int(get(r, "size", 0)),
-        get(r, "checksum", nothing),
-    )
+function parse_snapshot(resp::HTTP.Response)::QdrantResponse{SnapshotInfo}
+    raw, status, time = _unwrap(resp)
+    info = if raw isa AbstractDict
+        SnapshotInfo(
+            String(get(raw, "name", "")),
+            get(raw, "creation_time", nothing),
+            Int(get(raw, "size", 0)),
+            get(raw, "checksum", nothing),
+        )
+    else
+        SnapshotInfo("", nothing, 0, nothing)
+    end
+    QdrantResponse(info, status, time)
 end
 
-"""
-    parse_snapshot_list(resp::HTTP.Response) -> Vector{SnapshotInfo}
-
-Parse a list_snapshots response.
-"""
-function parse_snapshot_list(resp::HTTP.Response)
-    r = parse_response(resp)
-    r isa AbstractVector || return SnapshotInfo[]
-    SnapshotInfo[SnapshotInfo(
-        get(s, "name", "")::String,
-        get(s, "creation_time", nothing),
-        Int(get(s, "size", 0)),
-        get(s, "checksum", nothing),
-    ) for s in r]
+function parse_snapshot_list(resp::HTTP.Response)::QdrantResponse{Vector{SnapshotInfo}}
+    raw, status, time = _unwrap(resp)
+    list = if raw isa AbstractVector
+        SnapshotInfo[SnapshotInfo(
+            String(get(s, "name", "")),
+            get(s, "creation_time", nothing),
+            Int(get(s, "size", 0)),
+            get(s, "checksum", nothing),
+        ) for s in raw]
+    else
+        SnapshotInfo[]
+    end
+    QdrantResponse(list, status, time)
 end
 
-"""
-    parse_facet(resp::HTTP.Response) -> FacetResponse
-
-Parse a facet response.
-"""
-function parse_facet(resp::HTTP.Response)
-    r = parse_response(resp)
-    r isa AbstractDict || return FacetResponse(FacetHit[])
-    raw_hits = get(r, "hits", Any[])
-    FacetResponse(FacetHit[FacetHit(get(h, "value", nothing), Int(get(h, "count", 0))) for h in raw_hits])
+function parse_facet(resp::HTTP.Response)::QdrantResponse{FacetResult}
+    raw, status, time = _unwrap(resp)
+    hits = if raw isa AbstractDict
+        FacetHit[FacetHit(get(h, "value", nothing), Int(get(h, "count", 0)))
+                 for h in get(raw, "hits", Any[])]
+    else
+        FacetHit[]
+    end
+    QdrantResponse(FacetResult(hits), status, time)
 end
 
-# ── gRPC transport type (needed before API files for dispatch) ────────────
+# ── gRPC transport (defines GRPCTransport before API files) ──────────────
 include("grpc_transport.jl")
 
-"""
-    is_grpc(c::QdrantConnection) -> Bool
-
-Check if a connection uses gRPC transport.
-"""
-is_grpc(c::QdrantConnection) = c.transport isa GRPCTransport
-
-# ── API modules (HTTP/REST + gRPC internal dispatch) ─────────────────────
+# ── API files — HTTP implementations ────────────────────────────────────
 include("collections.jl")
 include("points.jl")
 include("query.jl")
@@ -420,7 +372,7 @@ include("snapshots.jl")
 include("distributed.jl")
 include("service.jl")
 
-# ── gRPC API implementations ────────────────────────────────────────────
+# ── API files — gRPC implementations ────────────────────────────────────
 include("grpc_collections.jl")
 include("grpc_points.jl")
 include("grpc_query.jl")
@@ -432,23 +384,19 @@ include("grpc_service.jl")
 # ============================================================================
 
 # Core
-export QdrantConnection, set_client!, get_client, QdrantError
+export QdrantConnection, QdrantResponse, set_client!, get_client, QdrantError
 
 # Transport
-export AbstractTransport, HTTPTransport, GRPCTransport, is_grpc
-
-# gRPC utilities (for advanced users)
-export to_proto_point, from_proto_scored_point, from_proto_retrieved_point
-export julia_value_to_proto, proto_value_to_julia
+export AbstractTransport, HTTPTransport, GRPCTransport
 
 # Type hierarchy
-export AbstractQdrantType, AbstractConfig, AbstractRequest, AbstractCondition, AbstractResponse
+export AbstractQdrantType, AbstractConfig, AbstractCondition, AbstractResponse
 
-# Type alias
-export Optional
+# Aliases
+export Optional, PointId
 
-# Enum & aliases
-export Distance, Cosine, Euclid, Dot, Manhattan, PointId
+# Distance
+export Distance, Cosine, Euclid, Dot, Manhattan
 
 # Config types
 export CollectionConfig, CollectionUpdate, VectorParams, SparseVectorParams
@@ -469,11 +417,11 @@ export Filter, FieldCondition, MatchValue, MatchAny, MatchText,
 # Request types
 export QueryRequest
 
-# Response types
-export UpdateResponse, CountResponse, ScoredPoint, Record
-export ScrollResponse, QueryResponse, GroupResult, GroupsResponse
+# Response / result types
+export UpdateResult, CountResult, ScoredPoint, Record
+export ScrollResult, QueryResult, GroupResult, GroupsResult
 export SnapshotInfo, CollectionDescription, AliasDescription
-export HealthResponse, FacetHit, FacetResponse
+export HealthInfo, FacetHit, FacetResult
 export SearchMatrixPairsResponse, SearchMatrixOffsetsResponse
 
 # Payload index types
@@ -495,7 +443,7 @@ export upsert_points, delete_points, get_points, get_point,
        delete_payload, clear_payload, update_vectors, delete_vectors,
        scroll_points, count_points, batch_points
 
-# Query API (modern unified)
+# Query API
 export query_points, query_batch, query_groups
 
 # Search matrix API
@@ -516,5 +464,9 @@ export create_payload_index, delete_payload_index
 
 # Distributed API
 export cluster_status
+
+# gRPC utilities (advanced)
+export to_proto_point, from_proto_scored_point, from_proto_retrieved_point
+export julia_value_to_proto, proto_value_to_julia
 
 end # module

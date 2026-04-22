@@ -56,6 +56,30 @@ Typed response types returned from API calls.
 """
 abstract type AbstractResponse <: AbstractQdrantType end
 
+"""
+    QdrantResponse{T}
+
+Standard envelope wrapping every API return value.
+
+# Fields
+- `result::T` — the typed payload
+- `status::String` — server status (e.g. `"ok"`)
+- `time::Float64` — server-side processing time in seconds
+
+# Examples
+```julia
+resp = upsert_points(conn, "demo", points)
+resp.result   # UpdateResult(operation_id=0, status="completed")
+resp.status   # "ok"
+resp.time     # 0.001
+```
+"""
+struct QdrantResponse{T}
+    result::T
+    status::String
+    time::Float64
+end
+
 # ============================================================================
 # Distance Enum
 # ============================================================================
@@ -570,20 +594,20 @@ Result of a mutating operation (upsert, delete, set_payload, etc.).
 - `operation_id::Int`: Server-assigned operation ID
 - `status::String`: Operation status (`"completed"` or `"acknowledged"`)
 """
-struct UpdateResponse <: AbstractResponse
+struct UpdateResult <: AbstractResponse
     operation_id::Int
     status::String
 end
 
 """
-    CountResponse <: AbstractResponse
+    CountResult <: AbstractResponse
 
 Result of `count_points`.
 
 # Fields
 - `count::Int`: Number of matching points
 """
-struct CountResponse <: AbstractResponse
+struct CountResult <: AbstractResponse
     count::Int
 end
 
@@ -624,7 +648,7 @@ struct Record <: AbstractResponse
 end
 
 """
-    ScrollResponse <: AbstractResponse
+    ScrollResult <: AbstractResponse
 
 Result of `scroll_points`.
 
@@ -632,20 +656,20 @@ Result of `scroll_points`.
 - `points::Vector{Record}`: Page of records
 - `next_page_offset::Optional{PointId}`: Offset for the next page (nothing if last page)
 """
-struct ScrollResponse <: AbstractResponse
+struct ScrollResult <: AbstractResponse
     points::Vector{Record}
     next_page_offset::Optional{PointId}
 end
 
 """
-    QueryResponse <: AbstractResponse
+    QueryResult <: AbstractResponse
 
 Result of `query_points`.
 
 # Fields
 - `points::Vector{ScoredPoint}`: Matching points with scores
 """
-struct QueryResponse <: AbstractResponse
+struct QueryResult <: AbstractResponse
     points::Vector{ScoredPoint}
 end
 
@@ -664,14 +688,14 @@ struct GroupResult <: AbstractResponse
 end
 
 """
-    GroupsResponse <: AbstractResponse
+    GroupsResult <: AbstractResponse
 
 Result of `query_groups`.
 
 # Fields
 - `groups::Vector{GroupResult}`: Groups of matching points
 """
-struct GroupsResponse <: AbstractResponse
+struct GroupsResult <: AbstractResponse
     groups::Vector{GroupResult}
 end
 
@@ -720,7 +744,7 @@ struct AliasDescription <: AbstractResponse
 end
 
 """
-    HealthResponse <: AbstractResponse
+    HealthInfo <: AbstractResponse
 
 Health check result.
 
@@ -728,7 +752,7 @@ Health check result.
 - `title::String`: Service title
 - `version::String`: Server version
 """
-struct HealthResponse <: AbstractResponse
+struct HealthInfo <: AbstractResponse
     title::String
     version::String
 end
@@ -748,14 +772,14 @@ struct FacetHit <: AbstractResponse
 end
 
 """
-    FacetResponse <: AbstractResponse
+    FacetResult <: AbstractResponse
 
 Result of `facet`.
 
 # Fields
 - `hits::Vector{FacetHit}`: Facet value counts
 """
-struct FacetResponse <: AbstractResponse
+struct FacetResult <: AbstractResponse
     hits::Vector{FacetHit}
 end
 

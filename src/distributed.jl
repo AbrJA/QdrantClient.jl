@@ -1,13 +1,14 @@
 # ============================================================================
-# Distributed / Cluster API
+# Distributed API — HTTP transport
 # ============================================================================
 
 """
-    cluster_status(client) -> Dict{String,Any}
+    cluster_status(conn) -> QdrantResponse{Dict{String,Any}}
 
 Get cluster status information.
 """
-function cluster_status(c::QdrantConnection=get_client())
-    resp = request(HTTP.get, c, "/cluster")
-    parse_response(resp)
+function cluster_status(conn::QdrantConnection{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, conn, "/cluster")
+    raw, status, time = _unwrap(resp)
+    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
