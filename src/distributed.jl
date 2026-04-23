@@ -3,14 +3,12 @@
 # ============================================================================
 
 """
-    cluster_status(client) -> QdrantResponse{Dict{String,Any}}
+    cluster_status(client) -> QdrantResponse{ClusterStatus}
 
 Get cluster status information.
 """
 function cluster_status(client::QdrantClient{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, client, "/cluster")
-    raw, status, time = _unwrap(resp)
-    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
+    parse_cluster_status(http_request(HTTP.get, client, "/cluster"))
 end
 
 """
@@ -50,14 +48,12 @@ function remove_peer(client::QdrantClient{HTTPTransport}, peer_id::Integer;
 end
 
 """
-    collection_cluster_info(client, collection) -> QdrantResponse{Dict{String,Any}}
+    collection_cluster_info(client, collection) -> QdrantResponse{CollectionClusterInfo}
 
 Get cluster information for a collection.
 """
 function collection_cluster_info(client::QdrantClient{HTTPTransport}, name::AbstractString)
-    resp = http_request(HTTP.get, client, "/collections/$name/cluster")
-    raw, status, time = _unwrap(resp)
-    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
+    parse_collection_cluster_info(http_request(HTTP.get, client, "/collections/$name/cluster"))
 end
 collection_cluster_info(name::AbstractString) = collection_cluster_info(get_client(), name)
 
@@ -78,14 +74,12 @@ update_collection_cluster(name::AbstractString, body::AbstractDict; kwargs...) =
 # ── Shard Keys ───────────────────────────────────────────────────────────
 
 """
-    list_shard_keys(client, collection) -> QdrantResponse{Dict{String,Any}}
+    list_shard_keys(client, collection) -> QdrantResponse{ShardKeysResult}
 
 List shard keys for a collection.
 """
 function list_shard_keys(client::QdrantClient{HTTPTransport}, name::AbstractString)
-    resp = http_request(HTTP.get, client, "/collections/$name/shards")
-    raw, status, time = _unwrap(resp)
-    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
+    parse_shard_keys(http_request(HTTP.get, client, "/collections/$name/shards"))
 end
 list_shard_keys(name::AbstractString) = list_shard_keys(get_client(), name)
 

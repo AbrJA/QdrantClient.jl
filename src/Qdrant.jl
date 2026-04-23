@@ -365,6 +365,128 @@ function parse_facet(resp::HTTP.Response)::QdrantResponse{FacetResult}
     QdrantResponse(FacetResult(hits), status, time)
 end
 
+function parse_collection_info(resp::HTTP.Response)::QdrantResponse{CollectionInfo}
+    raw, status, time = _unwrap(resp)
+    if raw isa AbstractDict
+        opt_raw = get(raw, "optimizer_status", "ok")
+        opt_status = if opt_raw isa AbstractDict
+            String(get(opt_raw, "error", "ok"))
+        else
+            String(opt_raw)
+        end
+        info = CollectionInfo(
+            String(get(raw, "status", "unknown")),
+            opt_status,
+            let v = get(raw, "points_count", nothing); v === nothing ? nothing : Int(v) end,
+            let v = get(raw, "indexed_vectors_count", nothing); v === nothing ? nothing : Int(v) end,
+            Int(get(raw, "segments_count", 0)),
+            get(raw, "config", Dict{String,Any}()) isa AbstractDict ?
+                Dict{String,Any}(get(raw, "config", Dict{String,Any}())) : Dict{String,Any}(),
+            get(raw, "payload_schema", Dict{String,Any}()) isa AbstractDict ?
+                Dict{String,Any}(get(raw, "payload_schema", Dict{String,Any}())) : Dict{String,Any}(),
+        )
+        QdrantResponse(info, status, time)
+    else
+        QdrantResponse(
+            CollectionInfo("unknown", "ok", nothing, nothing, 0, Dict{String,Any}(), Dict{String,Any}()),
+            status, time)
+    end
+end
+
+function parse_optimizations_status(resp::HTTP.Response)::QdrantResponse{OptimizationsStatus}
+    raw, status, time = _unwrap(resp)
+    if raw isa AbstractDict
+        running = raw["running"] isa AbstractVector ?
+            Dict{String,Any}[Dict{String,Any}(r) for r in raw["running"]] : Dict{String,Any}[]
+        summary = get(raw, "summary", Dict{String,Any}()) isa AbstractDict ?
+            Dict{String,Any}(get(raw, "summary", Dict{String,Any}())) : Dict{String,Any}()
+        queued_raw = get(raw, "queued", nothing)
+        queued = queued_raw isa AbstractVector ?
+            Dict{String,Any}[Dict{String,Any}(q) for q in queued_raw] : nothing
+        completed_raw = get(raw, "completed", nothing)
+        completed = completed_raw isa AbstractVector ?
+            Dict{String,Any}[Dict{String,Any}(c) for c in completed_raw] : nothing
+        QdrantResponse(OptimizationsStatus(running, summary, queued, completed), status, time)
+    else
+        QdrantResponse(OptimizationsStatus(Dict{String,Any}[], Dict{String,Any}(), nothing, nothing), status, time)
+    end
+end
+
+function parse_cluster_status(resp::HTTP.Response)::QdrantResponse{ClusterStatus}
+    raw, status, time = _unwrap(resp)
+    if raw isa AbstractDict
+        st = String(get(raw, "status", "disabled"))
+        peer_id_raw = get(raw, "peer_id", nothing)
+        peer_id = peer_id_raw === nothing ? nothing : Int(peer_id_raw)
+        peers = get(raw, "peers", Dict{String,Any}()) isa AbstractDict ?
+            Dict{String,Any}(get(raw, "peers", Dict{String,Any}())) : Dict{String,Any}()
+        raft = get(raw, "raft_info", Dict{String,Any}()) isa AbstractDict ?
+            Dict{String,Any}(get(raw, "raft_info", Dict{String,Any}())) : Dict{String,Any}()
+        failures = get(raw, "message_send_failures", Dict{String,Any}()) isa AbstractDict ?
+            Dict{String,Any}(get(raw, "message_send_failures", Dict{String,Any}())) : Dict{String,Any}()
+        QdrantResponse(ClusterStatus(st, peer_id, peers, raft, failures), status, time)
+    else
+        QdrantResponse(ClusterStatus("disabled", nothing, Dict{String,Any}(), Dict{String,Any}(), Dict{String,Any}()), status, time)
+    end
+end
+
+function _to_local_shard(d::AbstractDict)::LocalShardInfo
+    LocalShardInfo(
+        Int(d["shard_id"]),
+        let v = get(d, "points_count", nothing); v === nothing ? nothing : Int(v) end,
+        String(get(d, "state", "unknown")),
+        get(d, "shard_key", nothing),
+    )
+end
+
+function _to_remote_shard(d::AbstractDict)::RemoteShardInfo
+    RemoteShardInfo(
+        Int(d["shard_id"]),
+        Int(d["peer_id"]),
+        String(get(d, "state", "unknown")),
+        get(d, "shard_key", nothing),
+    )
+end
+
+function _to_shard_transfer(d::AbstractDict)::ShardTransferInfo
+    ShardTransferInfo(
+        Int(d["shard_id"]),
+        Int(d["from"]),
+        Int(d["to"]),
+        Bool(get(d, "sync", false)),
+        let v = get(d, "to_shard_id", nothing); v === nothing ? nothing : Int(v) end,
+        let v = get(d, "method", nothing); v === nothing ? nothing : String(v) end,
+        let v = get(d, "comment", nothing); v === nothing ? nothing : String(v) end,
+    )
+end
+
+function parse_collection_cluster_info(resp::HTTP.Response)::QdrantResponse{CollectionClusterInfo}
+    raw, status, time = _unwrap(resp)
+    if raw isa AbstractDict
+        info = CollectionClusterInfo(
+            Int(get(raw, "peer_id", 0)),
+            Int(get(raw, "shard_count", 0)),
+            LocalShardInfo[_to_local_shard(s) for s in get(raw, "local_shards", Any[])],
+            RemoteShardInfo[_to_remote_shard(s) for s in get(raw, "remote_shards", Any[])],
+            ShardTransferInfo[_to_shard_transfer(t) for t in get(raw, "shard_transfers", Any[])],
+        )
+        QdrantResponse(info, status, time)
+    else
+        QdrantResponse(CollectionClusterInfo(0, 0, LocalShardInfo[], RemoteShardInfo[], ShardTransferInfo[]), status, time)
+    end
+end
+
+function parse_shard_keys(resp::HTTP.Response)::QdrantResponse{ShardKeysResult}
+    raw, status, time = _unwrap(resp)
+    keys = if raw isa AbstractDict
+        raw_keys = get(raw, "shard_keys", Any[])
+        Any[let k = get(item, "key", item); k end for item in raw_keys]
+    else
+        Any[]
+    end
+    QdrantResponse(ShardKeysResult(keys), status, time)
+end
+
 # ── gRPC transport (defines GRPCTransport before API files) ──────────────
 include("grpc_transport.jl")
 
@@ -427,6 +549,9 @@ export ScrollResult, QueryResult, GroupResult, GroupsResult
 export SnapshotInfo, CollectionDescription, AliasDescription
 export HealthInfo, FacetHit, FacetResult
 export SearchMatrixPairsResponse, SearchMatrixOffsetsResponse
+export CollectionInfo, OptimizationsStatus
+export ClusterStatus, LocalShardInfo, RemoteShardInfo, ShardTransferInfo,
+       CollectionClusterInfo, ShardKeysResult
 
 # Payload index types
 export TextIndexParams

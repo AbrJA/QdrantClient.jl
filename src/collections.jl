@@ -80,14 +80,12 @@ collection_exists(name::AbstractString) = collection_exists(get_client(), name)
 # ── Get Info ─────────────────────────────────────────────────────────────
 
 """
-    get_collection(client, name) -> QdrantResponse{Dict{String,Any}}
+    get_collection(client, name) -> QdrantResponse{CollectionInfo}
 
 Get detailed collection information.
 """
 function get_collection(client::QdrantClient{HTTPTransport}, name::AbstractString)
-    resp = http_request(HTTP.get, client, _collection_path(name))
-    raw, status, time = _unwrap(resp)
-    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
+    parse_collection_info(http_request(HTTP.get, client, _collection_path(name)))
 end
 get_collection(name::AbstractString) = get_collection(get_client(), name)
 
@@ -116,14 +114,12 @@ update_collection(name::AbstractString; kwargs...) =
 # ── Optimization progress ───────────────────────────────────────────────
 
 """
-    get_collection_optimizations(client, name) -> QdrantResponse{Dict{String,Any}}
+    get_collection_optimizations(client, name) -> QdrantResponse{OptimizationsStatus}
 
 Get optimization progress for a collection.
 """
 function get_collection_optimizations(client::QdrantClient{HTTPTransport}, name::AbstractString)
-    resp = http_request(HTTP.get, client, _collection_path(name) * "/optimizations")
-    raw, status, time = _unwrap(resp)
-    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
+    parse_optimizations_status(http_request(HTTP.get, client, _collection_path(name) * "/optimizations"))
 end
 get_collection_optimizations(name::AbstractString) =
     get_collection_optimizations(get_client(), name)

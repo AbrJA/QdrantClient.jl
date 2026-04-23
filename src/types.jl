@@ -834,3 +834,161 @@ StructUtils.@kwarg struct TextIndexParams <: AbstractConfig
     max_token_len::Optional{Int} = nothing
     lowercase::Optional{Bool} = nothing
 end
+
+# ============================================================================
+# Typed Response Types — formerly Dict{String,Any}
+# ============================================================================
+
+"""
+    CollectionInfo <: AbstractResponse
+
+Detailed collection information from `get_collection`.
+
+# Fields
+- `status::String`: Collection status (e.g. `"green"`, `"yellow"`, `"red"`)
+- `optimizer_status::String`: Optimizer status (`"ok"` or error message)
+- `points_count::Optional{Int}`: Total number of points
+- `indexed_vectors_count::Optional{Int}`: Number of indexed vectors
+- `segments_count::Int`: Number of segments
+- `config::Dict{String,Any}`: Collection configuration (vectors, HNSW, WAL, etc.)
+- `payload_schema::Dict{String,Any}`: Indexed payload field schemas
+"""
+struct CollectionInfo <: AbstractResponse
+    status::String
+    optimizer_status::String
+    points_count::Optional{Int}
+    indexed_vectors_count::Optional{Int}
+    segments_count::Int
+    config::Dict{String,Any}
+    payload_schema::Dict{String,Any}
+end
+
+"""
+    OptimizationsStatus <: AbstractResponse
+
+Optimization progress for a collection from `get_collection_optimizations`.
+
+# Fields
+- `running::Vector{Dict{String,Any}}`: Currently running optimizations
+- `summary::Dict{String,Any}`: Aggregated optimization statistics
+- `queued::Optional{Vector{Dict{String,Any}}}`: Pending optimizations (requires `?with=queued`)
+- `completed::Optional{Vector{Dict{String,Any}}}`: Completed optimizations (requires `?with=completed`)
+"""
+struct OptimizationsStatus <: AbstractResponse
+    running::Vector{Dict{String,Any}}
+    summary::Dict{String,Any}
+    queued::Optional{Vector{Dict{String,Any}}}
+    completed::Optional{Vector{Dict{String,Any}}}
+end
+
+"""
+    ClusterStatus <: AbstractResponse
+
+Cluster status from `cluster_status`.
+
+# Fields
+- `status::String`: `"disabled"` or `"enabled"`
+- `peer_id::Optional{Int}`: This node's peer ID (only when enabled)
+- `peers::Dict{String,Any}`: Peer ID → peer info map (only when enabled)
+- `raft_info::Dict{String,Any}`: Raft consensus state (only when enabled)
+- `message_send_failures::Dict{String,Any}`: Consecutive send failures per peer (only when enabled)
+"""
+struct ClusterStatus <: AbstractResponse
+    status::String
+    peer_id::Optional{Int}
+    peers::Dict{String,Any}
+    raft_info::Dict{String,Any}
+    message_send_failures::Dict{String,Any}
+end
+
+"""
+    LocalShardInfo <: AbstractResponse
+
+Information about a locally-hosted shard.
+
+# Fields
+- `shard_id::Int`: Shard identifier
+- `points_count::Optional{Int}`: Number of points in the shard
+- `state::String`: Shard state (e.g. `"Active"`, `"Partial"`)
+- `shard_key::Optional{Any}`: Shard key if using custom sharding
+"""
+struct LocalShardInfo <: AbstractResponse
+    shard_id::Int
+    points_count::Optional{Int}
+    state::String
+    shard_key::Optional{Any}
+end
+
+"""
+    RemoteShardInfo <: AbstractResponse
+
+Information about a remotely-hosted shard replica.
+
+# Fields
+- `shard_id::Int`: Shard identifier
+- `peer_id::Int`: Peer hosting this shard
+- `state::String`: Shard state
+- `shard_key::Optional{Any}`: Shard key if using custom sharding
+"""
+struct RemoteShardInfo <: AbstractResponse
+    shard_id::Int
+    peer_id::Int
+    state::String
+    shard_key::Optional{Any}
+end
+
+"""
+    ShardTransferInfo <: AbstractResponse
+
+Information about an in-progress shard transfer.
+
+# Fields
+- `shard_id::Int`: Shard being transferred
+- `from::Int`: Source peer ID
+- `to::Int`: Destination peer ID
+- `sync::Bool`: Whether this is a synchronous transfer
+- `to_shard_id::Optional{Int}`: Target shard ID (for resharding)
+- `method::Optional{String}`: Transfer method
+- `comment::Optional{String}`: Human-readable description
+"""
+struct ShardTransferInfo <: AbstractResponse
+    shard_id::Int
+    from::Int
+    to::Int
+    sync::Bool
+    to_shard_id::Optional{Int}
+    method::Optional{String}
+    comment::Optional{String}
+end
+
+"""
+    CollectionClusterInfo <: AbstractResponse
+
+Cluster information for a specific collection from `collection_cluster_info`.
+
+# Fields
+- `peer_id::Int`: This node's peer ID
+- `shard_count::Int`: Total number of shards
+- `local_shards::Vector{LocalShardInfo}`: Shards hosted on this node
+- `remote_shards::Vector{RemoteShardInfo}`: Shards hosted on remote nodes
+- `shard_transfers::Vector{ShardTransferInfo}`: In-progress shard transfers
+"""
+struct CollectionClusterInfo <: AbstractResponse
+    peer_id::Int
+    shard_count::Int
+    local_shards::Vector{LocalShardInfo}
+    remote_shards::Vector{RemoteShardInfo}
+    shard_transfers::Vector{ShardTransferInfo}
+end
+
+"""
+    ShardKeysResult <: AbstractResponse
+
+Result of `list_shard_keys`.
+
+# Fields
+- `shard_keys::Vector{Any}`: List of shard keys (strings, integers, or key objects)
+"""
+struct ShardKeysResult <: AbstractResponse
+    shard_keys::Vector{Any}
+end

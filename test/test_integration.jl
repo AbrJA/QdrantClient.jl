@@ -27,7 +27,8 @@
         @test exists.result === true
 
         info = get_collection(CONN, name)
-        @test info.result["status"] == "green"
+        @test info.result isa CollectionInfo
+        @test info.result.status == "green"
 
         @test delete_collection(CONN, name).result === true
     end
@@ -37,7 +38,7 @@
         cleanup_collection(CONN, name)
         create_collection(CONN, name; vectors=VectorParams(size=4, distance=Cosine))
         info = get_collection(CONN, name)
-        @test info.result["config"]["params"]["vectors"]["distance"] == "Cosine"
+        @test info.result.config["params"]["vectors"]["distance"] == "Cosine"
         cleanup_collection(CONN, name)
     end
 
@@ -50,8 +51,8 @@
             optimizers_config=OptimizersConfig(indexing_threshold=10000),
         ))
         info = get_collection(CONN, name)
-        @test info.result["config"]["hnsw_config"]["m"] == 32
-        @test info.result["config"]["optimizer_config"]["indexing_threshold"] == 10000
+        @test info.result.config["hnsw_config"]["m"] == 32
+        @test info.result.config["optimizer_config"]["indexing_threshold"] == 10000
         cleanup_collection(CONN, name)
     end
 
@@ -60,7 +61,7 @@
         cleanup_collection(CONN, name)
         create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
         opt = get_collection_optimizations(CONN, name)
-        @test opt.result isa AbstractDict
+        @test opt.result isa OptimizationsStatus
         cleanup_collection(CONN, name)
     end
 
@@ -357,7 +358,7 @@
 
     @testset "Cluster Status" begin
         cs = cluster_status(CONN)
-        @test cs.result isa AbstractDict
+        @test cs.result isa ClusterStatus
     end
 
     @testset "Facet" begin
@@ -424,7 +425,7 @@
         create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
 
         ci = collection_cluster_info(CONN, name)
-        @test ci.result isa AbstractDict
+        @test ci.result isa CollectionClusterInfo
 
         cleanup_collection(CONN, name)
     end
@@ -435,7 +436,7 @@
         create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
 
         keys_resp = list_shard_keys(CONN, name)
-        @test keys_resp.result isa AbstractDict
+        @test keys_resp.result isa ShardKeysResult
 
         # Custom sharding operations may fail on default single-node setup.
         try
