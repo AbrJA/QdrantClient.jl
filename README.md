@@ -92,9 +92,13 @@ create_collection(client, name, config) -> QdrantResponse{Bool}
 create_collection(client, name; vectors=VectorParams(...)) -> QdrantResponse{Bool}
 delete_collection(client, name) -> QdrantResponse{Bool}
 collection_exists(client, name) -> QdrantResponse{Bool}
-get_collection(client, name) -> QdrantResponse{Dict{String,Any}}
+get_collection(client, name) -> QdrantResponse{CollectionInfo}
+get_collection_optimizations(client, name) -> QdrantResponse{OptimizationsStatus}
 update_collection(client, name, update) -> QdrantResponse{Bool}
 ```
+
+`get_collection` returns a typed `CollectionInfo` payload with strongly-typed
+top-level fields and raw nested config dictionaries.
 
 ### Aliases
 
@@ -180,21 +184,32 @@ clear_issues(client) -> QdrantResponse{Bool}
 ### Cluster & Distributed
 
 ```julia
-cluster_status(client) -> QdrantResponse{Dict{String,Any}}
+cluster_status(client) -> QdrantResponse{ClusterStatus}
 cluster_telemetry(client) -> QdrantResponse{Dict{String,Any}}
 recover_current_peer(client) -> QdrantResponse{Bool}
 remove_peer(client, peer_id; force=false) -> QdrantResponse{Bool}
-collection_cluster_info(client, collection) -> QdrantResponse{Dict{String,Any}}
+collection_cluster_info(client, collection) -> QdrantResponse{CollectionClusterInfo}
 update_collection_cluster(client, collection, operations) -> QdrantResponse{Bool}
 ```
 
 ### Shard Keys
 
 ```julia
-list_shard_keys(client, collection) -> QdrantResponse{Dict{String,Any}}
+list_shard_keys(client, collection) -> QdrantResponse{ShardKeysResult}
 create_shard_key(client, collection, request) -> QdrantResponse{Bool}
 delete_shard_key(client, collection, request) -> QdrantResponse{Bool}
 ```
+
+### Typed vs Dynamic Responses
+
+Most endpoints return typed structs in `.result` (for example,
+`CollectionInfo`, `ClusterStatus`, `CollectionClusterInfo`, `ShardKeysResult`).
+Some high-variance endpoints intentionally remain dynamic and return
+`Dict{String,Any}`:
+
+- `get_telemetry`
+- `cluster_telemetry`
+- `get_issues`
 
 ### Shard Snapshots
 
@@ -259,11 +274,19 @@ IsNullCondition(; is_null)
 | `GroupResult` | `id`, `hits::Vector{ScoredPoint}` |
 | `GroupsResult` | `groups::Vector{GroupResult}` |
 | `SnapshotInfo` | `name::String`, `creation_time`, `size::Int`, `checksum` |
-| `HealthInfo` | `title::String`, `version::String`, `commit::String` |
+| `HealthInfo` | `title::String`, `version::String` |
 | `FacetResult` | `hits::Vector{FacetHit}` |
 | `FacetHit` | `value`, `count::Int` |
 | `CollectionDescription` | `name::String` |
 | `AliasDescription` | `alias_name::String`, `collection_name::String` |
+| `CollectionInfo` | `status`, `optimizer_status`, `points_count`, `indexed_vectors_count`, `segments_count`, `config`, `payload_schema` |
+| `OptimizationsStatus` | `running`, `summary`, `queued`, `completed` |
+| `ClusterStatus` | `status`, `peer_id`, `peers`, `raft_info`, `message_send_failures` |
+| `LocalShardInfo` | `shard_id`, `points_count`, `state`, `shard_key` |
+| `RemoteShardInfo` | `shard_id`, `peer_id`, `state`, `shard_key` |
+| `ShardTransferInfo` | `shard_id`, `from`, `to`, `sync`, `to_shard_id`, `method`, `comment` |
+| `CollectionClusterInfo` | `peer_id`, `shard_count`, `local_shards`, `remote_shards`, `shard_transfers` |
+| `ShardKeysResult` | `shard_keys::Vector{Any}` |
 
 ## gRPC Transport
 

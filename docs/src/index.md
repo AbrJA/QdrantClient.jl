@@ -205,6 +205,14 @@ SnapshotInfo
 HealthInfo
 CollectionDescription
 AliasDescription
+CollectionInfo
+OptimizationsStatus
+ClusterStatus
+LocalShardInfo
+RemoteShardInfo
+ShardTransferInfo
+CollectionClusterInfo
+ShardKeysResult
 FacetHit
 FacetResult
 SearchMatrixPairsResponse
